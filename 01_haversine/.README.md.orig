@@ -1,0 +1,38 @@
+# Haversine Distance Problem
+
+This repository is an attempt at the first problem in Casey Muratori's 
+[Performance Aware Programming](https://www.computerenhance.com/) series.
+
+The problem will be to optimize an implementation of the haversine
+distance problem, starting with a python implementation.
+
+## Generating input data
+
+We are testing against a 10 million data point input for the initial
+tests. Includes in this repo is a utility to generate this random
+data.
+
+```
+cd gen_haversine_data
+cargo run -r -- 10000000
+```
+
+This will write the file `data_10000000_flex.json` to the local directory.
+
+## Naive python
+
+Naive python script found in `naive.py`
+
+## Rust implementation
+
+Rust implementation included with a comparsion between `serde_json` and `simd_json`.
+
+## Testing
+
+Test script included to generate data sets of `10000`, `100000`, `1000000`, `10000000`
+and then run each one through the test suite
+
+```
+./test.sh
+```
+

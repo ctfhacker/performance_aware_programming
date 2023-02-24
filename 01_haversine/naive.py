@@ -8,7 +8,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("input", help="Input JSON file to time")
 args = parser.parse_args()
 
-print(f'---- Parsing {args.input} ---- ')
+# print(f'---- Parsing {args.input} ---- ')
 
 # Open the given JSON file
 json_file = open(args.input)
@@ -29,7 +29,7 @@ def haversine_degrees(x0, y0, x1, y1, radius):
     result = 2 * radius * asin(sqrt(root))
     return result
 
-earth_radius_km = 6371
+earth_radius_km = 6371.0
 sum = 0
 count = 0
 for pair in data['pairs']:
@@ -44,8 +44,8 @@ input_time = mid_time - start_time
 math_time  = end_time - mid_time
 
 # Display the result
-print(f'Result: {average:6.2f}')
-print(f'Input = {input_time:8.4f} seconds | {input_time / total_time * 100.:6.2f}% of total time')
-print(f'Math  = {math_time:8.4f} seconds | {math_time / total_time * 100.:6.2f}% of total time')
-print(f'Total = {(end_time - start_time):8.4f} seconds')
-print(f'Throughput = {count / (end_time - start_time):8.2f} haversines/seconds')
+print(f'Result     =  {average:6.2f}')
+print(f'Input      = {input_time:8.4f} seconds | {input_time / total_time * 100.:6.2f}% of total time')
+print(f'Math       = {math_time:8.4f} seconds | {math_time / total_time * 100.:6.2f}% of total time')
+print(f'Total      = {(end_time - start_time):8.4f} seconds')
+print(f'Throughput = {count / (end_time - start_time) / 1000000:8.2f} Mhaversines/seconds')

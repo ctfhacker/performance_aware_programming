@@ -7,16 +7,24 @@ struct CommandLineArgs {
     /// Number of pairs to randomly generate
     number: usize,
 
-    /// The minimum value to generate
-    #[arg(long, allow_negative_numbers(true), default_value_t = -200.0)]
-    min: f32,
+    /// The minimum X axis to generate
+    #[arg(long, allow_negative_numbers(true), default_value_t = -90.0)]
+    min_x: f32,
 
-    /// The maximum value to generate
-    #[arg(long, allow_negative_numbers(true), default_value_t = 200.0)]
-    max: f32,
+    /// The maximum X axis to generate
+    #[arg(long, allow_negative_numbers(true), default_value_t = 90.0)]
+    max_x: f32,
+
+    /// The minimum Y axis to generate
+    #[arg(long, allow_negative_numbers(true), default_value_t = -180.0)]
+    min_y: f32,
+
+    /// The maximum Y axis to generate
+    #[arg(long, allow_negative_numbers(true), default_value_t = 180.0)]
+    max_y: f32,
 }
 
-/// A point on the earth
+/// A set of points on earth
 #[derive(Serialize, Deserialize)]
 struct Points {
     pairs: Vec<Point>,
@@ -40,22 +48,18 @@ fn main() {
     // Init the RNG used to generate random points
     let mut rng = rand::thread_rng();
 
-    // Get the minimum and maximum values from the command line
-    let min = args.min;
-    let max = args.max;
-
     println!(
-        "Generating {} random points from range ({min}..{max})",
-        args.number
+        "Generating {} random points from range ({}..{}, ({}..{}))",
+        args.number, args.min_x, args.max_x, args.min_y, args.max_y
     );
 
     // Generate 10M random points
     for _ in 0..args.number {
         let point = Point {
-            x0: rng.gen_range(min..max),
-            y0: rng.gen_range(min..max),
-            x1: rng.gen_range(min..max),
-            y1: rng.gen_range(min..max),
+            x0: rng.gen_range(args.min_x..args.max_x),
+            y0: rng.gen_range(args.min_y..args.max_y),
+            x1: rng.gen_range(args.min_x..args.max_x),
+            y1: rng.gen_range(args.min_y..args.max_y),
         };
 
         pairs.push(point);

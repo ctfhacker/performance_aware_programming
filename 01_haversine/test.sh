@@ -1,4 +1,11 @@
 #!/bin/bash
+function print_cpuinfo() {
+	if [ -f "/proc/cpuinfo" ]; then
+		MODEL=`grep "model name" /proc/cpuinfo | tr -s ' ' | cut -d' ' -f3- | head -n 1`
+		echo "CPU: $MODEL"
+	fi
+}
+
 function generate_data() {
 	# Check if data is already generated
 	if [ -f "./data_10000000_flex.json" ]; then
@@ -26,11 +33,32 @@ function generate_data() {
 }
 
 
-function test_naive_python() {
-  echo "#################### Naive Python ####################"
-	for f in $(ls data*); do python3 naive.py $f; done
+function test() {
+	echo "Building the rust harness"
+	cd ./rust
+	cargo build -r >/dev/null 2>/dev/null
+	cd ..
+
+	for f in $(ls data*); do 
+	  echo "-------------------- $f --------------------"
+	  echo "################ Python ################"
+		python3 naive.py $f
+	  echo "################ Rust   ################"
+		./rust/target/release/haversine_distance $f
+	done
 }
 
-generate_data
-test_naive_python
+# Run the tests, capturing the output
+print_cpuinfo > output
+generate_data >> output
+test >> output
+
+# Create the readme with the current test output
+cp .README.md.orig README.md
+echo '```' >> README.md
+cat output >> README.md
+echo '```' >> README.md
+
+# Remove the output file
+/bin/rm output
 	
