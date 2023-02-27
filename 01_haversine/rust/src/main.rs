@@ -1,10 +1,13 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
 use clap::Parser;
+use core_affinity::{set_for_current, CoreId};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
@@ -52,6 +55,77 @@ pub fn simd_json(input: &PathBuf) -> Result<Points> {
     simd_json::serde::from_reader(reader).map_err(|e| e.into())
 }
 
+pub fn naive_work(data: Arc<Points>, cores: usize) -> f32 {
+    let earth_radius_km = 6371.0;
+    let mut sum = 0.0;
+    for pair in &data.pairs {
+        sum += haversine_degrees(*pair, earth_radius_km);
+    }
+
+    sum
+}
+
+pub fn rayon_work_par_iter(data: Arc<Points>, cores: usize) -> f32 {
+    std::env::set_var("RAYON_NUM_THREADS", format!("{cores}"));
+
+    let earth_radius_km = 6371.0;
+    let mut sum = 0.0;
+
+    let pairs = data.pairs.as_slice();
+    let sum: f32 = pairs
+        .par_iter()
+        .map(|pair| haversine_degrees(*pair, earth_radius_km))
+        .sum();
+
+    sum
+}
+
+fn worker(data: Arc<Points>, start_index: usize, len: usize) -> f32 {
+    let mut sum = 0.0;
+    let earth_radius_km = 6371.0;
+    for offset in start_index..start_index + len {
+        let pair = data.pairs[offset];
+        sum += haversine_degrees(pair, earth_radius_km);
+    }
+    sum
+}
+
+/// Manually chunk and parallelize the data for the given number of cores
+pub fn manual_chunk_parallel(data: Arc<Points>, cores: usize) -> f32 {
+    let per_core_len = data.pairs.len() / cores;
+    let last_core_offset = data.pairs.len() - (cores * per_core_len);
+    let mut threads = Vec::new();
+    let core_ids = core_affinity::get_core_ids().expect("Failed to get core ids");
+
+    for (index, core_id) in core_ids.into_iter().enumerate().take(cores) {
+        let offset = index * per_core_len;
+        let data = data.clone();
+        let mut len = per_core_len - 1;
+
+        // If the data isn't evenly divisible by the number of cores,
+        // attempt to equally spread the remainder work between the cores
+        if index < last_core_offset {
+            len += 1;
+        }
+
+        let t = std::thread::spawn(move || {
+            // Pin this thread to this core_id
+            set_for_current(core_id);
+
+            // Execute the worker thread for this core
+            worker(data, offset, len)
+        });
+        threads.push(t);
+    }
+
+    let mut sum = 0.0;
+    for t in threads {
+        sum += t.join().unwrap()
+    }
+
+    sum
+}
+
 pub fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
 
@@ -72,33 +146,72 @@ pub fn main() -> Result<()> {
     // Sanity check that the simdjson and serde_json result in the same data
     assert!(simd_data == serde_data, "serde and simd json disagree!");
 
-    let data = simd_data;
+    let data = Arc::new(simd_data);
+    let count = data.pairs.len();
 
-    // Time the math calculation
-    let start_time = Instant::now();
-    let earth_radius_km = 6371.0;
-    let mut sum = 0.0;
-    let mut count = 0;
-    for pair in data.pairs.iter() {
-        sum += haversine_degrees(*pair, earth_radius_km);
-        count += 1;
+    // Print the read in
+    println!("Input      = {simd_time:10.4?}");
+
+    // Time the given work function parallelized over the given number of cores
+    macro_rules! time_work {
+        ($work_func:ident, $cores:expr) => {
+            // Get a reference to the data for this test (only incrementing a ref counter)
+            let data = data.clone();
+
+            // Start the timer for this work
+            let start_time = Instant::now();
+
+            // Execute the given tested work
+            let sum: f32 = $work_func(data, $cores);
+
+            // Stop the timer
+            let math_time = Instant::now() - start_time;
+
+            // Calculate statistics for this test case
+            let total_time = simd_time + math_time;
+            let math_percent = math_time.as_secs_f32() / total_time.as_secs_f32() * 100.;
+            let simd_percent = simd_time.as_secs_f32() / total_time.as_secs_f32() * 100.;
+            let average = sum / count as f32;
+            let throughput = count as f32 / total_time.as_secs_f32() / 1_000_000.;
+
+            // Print the statistic results
+            println!(
+                "{} {} with {} cores {}",
+                "-".repeat(40 - stringify!($work_func).len() / 2),
+                stringify!($work_func),
+                $cores,
+                "-".repeat(40 - stringify!($work_func).len() / 2),
+            );
+            println!("{:30} = {average:4.2}", "Average");
+            println!(
+                "{:30} = {simd_time:10.4?} | {simd_percent:6.2}% of total time (using simdjson)",
+                "simdjson"
+            );
+            println!(
+                "{:30} = {math_time:10.4?} | {math_percent:6.2}% of total time (using simdjson)",
+                stringify!($work_func),
+            );
+            println!(
+                "{:30} = {total_time:8.4?} seconds (using simdjson)",
+                "Total"
+            );
+            println!("{:30} = {throughput:4.2} Mhaversines/seconds", "Throughput");
+        };
     }
-    let math_time = Instant::now() - start_time;
-    let total_time = math_time + simd_time;
-    let average = sum / count as f32;
-    let math_percent = math_time.as_secs_f32() / total_time.as_secs_f32() * 100.;
-    let simd_percent = simd_time.as_secs_f32() / total_time.as_secs_f32() * 100.;
-    let throughput = count as f32 / total_time.as_secs_f32() / 1_000_000.;
 
-    println!("Result     = {average:4.2}");
-    println!(
-        "Input      = {simd_time:10.4?} | {simd_percent:6.2?}% of total time (using simdjson)"
-    );
-    println!(
-        "Math       = {math_time:10.4?} | {math_percent:6.2?}% of total time (using simdjson)"
-    );
-    println!("Total      = {total_time:8.4?} seconds (using simdjson)");
-    println!("Throughput = {throughput:4.2} Mhaversines/seconds");
+    time_work!(naive_work, 1);
+
+    time_work!(rayon_work_par_iter, 2);
+    time_work!(rayon_work_par_iter, 4);
+    time_work!(rayon_work_par_iter, 8);
+    time_work!(rayon_work_par_iter, 12);
+    time_work!(rayon_work_par_iter, 16);
+
+    time_work!(manual_chunk_parallel, 2);
+    time_work!(manual_chunk_parallel, 4);
+    time_work!(manual_chunk_parallel, 8);
+    time_work!(manual_chunk_parallel, 12);
+    time_work!(manual_chunk_parallel, 16);
 
     Ok(())
 }

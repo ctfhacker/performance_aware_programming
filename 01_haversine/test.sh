@@ -41,14 +41,18 @@ function test() {
 
 	for f in $(ls data*); do 
 	  echo "-------------------- $f --------------------"
-	  echo "################ Python ################"
-		python3 naive.py $f
+	  # echo "################ Python ################"
+		# python3 naive.py $f
 	  echo "################ Rust   ################"
 		./rust/target/release/haversine_distance $f
 	done
 }
 
 # Run the tests, capturing the output
+print_cpuinfo 
+generate_data 
+test
+
 print_cpuinfo > output
 generate_data >> output
 test >> output
