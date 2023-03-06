@@ -5,6 +5,9 @@ This repository contains material from Casey Muratori's
 
 Most of the exercises will be completed in Rust, C, and Python.
 
+
 ## Problems
 
-[01 Haversine Distance](./01_haversine)
+[Interlude - Haversine Distance](./01_haversine)
+[Part 1 - 8086 Emulator](./emu8086)
+
