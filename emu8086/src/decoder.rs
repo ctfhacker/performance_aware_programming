@@ -22,11 +22,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
         let instr = match input[0] {
             // Register/memory to/from register
             0b1000_1000..=0b1000_1011 => {
-                //  76543210 76543210 76543210 76543210
-                // +--------+--------+--------+--------+
-                // |100010dw|modregrm|xxxxxxxx|xxxxxxxx|
-                // +--------+--------+--------+--------+
-                // Parse the bit fields for the MOV instruction
+                // Parse the bit fields
                 let w = input[0] & 1;
                 let d = (input[0] >> 1) & 1 > 0;
                 let rm = (input[1] >> 0) & 0b111;
@@ -52,6 +48,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // Immediate to register/memory
             0b1100_0110..=0b1100_0111 => {
+                // Parse the bit fields
                 let wide = input[0] & 1;
 
                 // Sanity check the middle 3 bits of the second byte for this instruction
@@ -90,6 +87,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // Immediate to register
             0b1011_0000..=0b1011_1111 => {
+                // Parse the bit fields
                 let wide = (input[0] >> 4) & 1;
                 let reg = input[0] & 0b111;
                 let reg = Register::from_reg_w(Reg(reg), Wide(wide));
@@ -112,6 +110,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // Memory to accumulator
             0b1010_0000..=0b1010_0001 => {
+                // Parse the bit fields
                 let wide = input[0] & 1;
                 let mut imm = input[1] as u16;
                 let mut size = 2;
@@ -129,8 +128,9 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     src: Operand::Memory(Memory::direct_address(imm)),
                 }
             }
-            // Memory to accumulator
+            // Accumulator to Memory
             0b1010_0010..=0b1010_0011 => {
+                // Parse the bit fields
                 let wide = input[0] & 1;
                 let mut imm = input[1] as u16;
                 let mut size = 2;
