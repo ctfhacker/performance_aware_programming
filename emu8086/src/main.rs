@@ -4,6 +4,7 @@ use anyhow::Result;
 
 mod decoder;
 mod instruction;
+mod memory;
 mod register;
 
 fn main() -> Result<()> {

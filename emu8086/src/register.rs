@@ -1,5 +1,8 @@
+//! An 8086 register
+use crate::instruction::{Reg, Wide};
+
 /// Register 8086 bank
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Register {
     Ax,
     Al,
@@ -44,8 +47,8 @@ impl std::fmt::Display for Register {
 
 impl Register {
     // Get a register from a decoded `reg` or `rm` value and `w`
-    pub const fn from_reg_w(reg: u8, w: u8) -> Register {
-        match (reg, w) {
+    pub const fn from_reg_w(reg: Reg, w: Wide) -> Register {
+        match (reg.0, w.0) {
             (0b000, 0b0) => Register::Al,
             (0b000, 0b1) => Register::Ax,
             (0b001, 0b0) => Register::Cl,
