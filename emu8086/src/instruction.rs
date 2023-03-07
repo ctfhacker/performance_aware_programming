@@ -58,32 +58,16 @@ impl std::fmt::Display for Operand {
                 }
 
                 // Write the displacement if it exists
-                match memory.displacement {
-                    Some(crate::memory::Displacement::Byte(offset)) => {
-                        // Add pretty spacing around the sign of the offset
-                        if offset.is_negative() {
-                            write!(f, " - ")?;
-                        } else {
-                            write!(f, " + ")?;
-                        }
+                if let Some(displacement) = memory.displacement {
+                    // Add pretty spacing around the sign of the offset
+                    if displacement.is_negative() {
+                        write!(f, " - ")?;
+                    } else {
+                        write!(f, " + ")?;
+                    }
 
-                        // Regardless, print the absolute value of the offset
-                        write!(f, "{:#x}", offset.abs())?;
-                    }
-                    Some(crate::memory::Displacement::Word(offset)) => {
-                        // Add pretty spacing around the sign of the offset
-                        if offset.is_negative() {
-                            write!(f, " - ")?;
-                        } else {
-                            write!(f, " + ")?;
-                        }
-
-                        // Regardless, print the absolute value of the offset
-                        write!(f, "{:#x}", offset.abs())?;
-                    }
-                    _ => {
-                        // Nothing else to do here
-                    }
+                    // Regardless, print the absolute value of the offset
+                    write!(f, "{:#x}", displacement.abs())?;
                 }
 
                 write!(f, "]")

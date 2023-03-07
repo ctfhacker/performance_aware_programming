@@ -32,13 +32,6 @@ impl std::fmt::Display for MemorySize {
     }
 }
 
-/// The size of the displacement for a memory operand
-#[derive(Debug, Copy, Clone)]
-pub enum Displacement {
-    Byte(i8),
-    Word(i16),
-}
-
 /// A memory operand
 #[derive(Debug, Copy, Clone)]
 pub struct Memory {
@@ -46,7 +39,7 @@ pub struct Memory {
     pub registers: [Option<Register>; 2],
 
     /// Displacement value for this memory operand
-    pub displacement: Option<Displacement>,
+    pub displacement: Option<i16>,
 
     /// Size of memory read
     pub size: MemorySize,
@@ -125,15 +118,9 @@ impl Memory {
         })
     }
 
-    /// Set the displacement for this memory operand as a word
-    pub fn with_word_displacement(mut self, displacement: i16) -> Self {
-        self.displacement = Some(Displacement::Word(displacement));
-        self
-    }
-
-    /// Set the displacement for this memory operand as a byte
-    pub fn with_byte_displacement(mut self, displacement: i8) -> Self {
-        self.displacement = Some(Displacement::Byte(displacement));
+    /// Set the displacement for this memory operand
+    pub fn with_displacement(mut self, displacement: i16) -> Self {
+        self.displacement = Some(displacement);
         self
     }
 }

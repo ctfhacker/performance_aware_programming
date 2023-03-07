@@ -185,9 +185,9 @@ pub fn parse_mov_instr(
         }
         0b01 => {
             let reg = Register::from_reg_w(reg, wide);
-            let displacement = input[2] as i8;
+            let displacement = input[2] as i8 as i16;
 
-            let mem = Memory::from_mod_rm(mod_, rm, wide)?.with_byte_displacement(displacement);
+            let mem = Memory::from_mod_rm(mod_, rm, wide)?.with_displacement(displacement);
 
             (Operand::Register(reg), Operand::Memory(mem), 3)
         }
@@ -195,7 +195,7 @@ pub fn parse_mov_instr(
             let reg = Register::from_reg_w(reg, wide);
             let displacement = input[2] as i16 | (input[3] as i16) << 8;
 
-            let mem = Memory::from_mod_rm(mod_, rm, wide)?.with_word_displacement(displacement);
+            let mem = Memory::from_mod_rm(mod_, rm, wide)?.with_displacement(displacement);
 
             (Operand::Register(reg), Operand::Memory(mem), 4)
         }
