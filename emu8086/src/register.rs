@@ -1,6 +1,8 @@
 //! An 8086 register
 use crate::instruction::{Reg, Wide};
 
+use thiserror::Error;
+
 /// Register 8086 bank
 #[derive(Debug, Copy, Clone)]
 pub enum Register {
@@ -66,6 +68,47 @@ impl Register {
             (0b111, 0b0) => Register::Bh,
             (0b111, 0b1) => Register::Di,
             _ => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+}
+
+/// An 8086 segment register
+#[derive(Debug, Copy, Clone)]
+pub enum SegmentRegister {
+    Es,
+    Cs,
+    Ss,
+    Ds,
+}
+
+/// Error while parsing a segment register
+#[derive(Error, Debug)]
+pub enum SegmentRegisterError {
+    #[error("Attempted to parse an unknown segment register: {0:#x}")]
+    UnknownSegmentRegister(u8),
+}
+
+impl TryFrom<u8> for SegmentRegister {
+    type Error = SegmentRegisterError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0b00 => Ok(SegmentRegister::Es),
+            0b01 => Ok(SegmentRegister::Cs),
+            0b10 => Ok(SegmentRegister::Ss),
+            0b11 => Ok(SegmentRegister::Ds),
+            _ => Err(SegmentRegisterError::UnknownSegmentRegister(value)),
+        }
+    }
+}
+
+impl std::fmt::Display for SegmentRegister {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            SegmentRegister::Es => write!(f, "es"),
+            SegmentRegister::Cs => write!(f, "cs"),
+            SegmentRegister::Ss => write!(f, "ss"),
+            SegmentRegister::Ds => write!(f, "ds"),
         }
     }
 }
