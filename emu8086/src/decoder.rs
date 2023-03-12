@@ -11,6 +11,15 @@ pub enum DecoderError {
     UnknownInstruction(u8, usize),
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum Repeat {
+    /// Repeat/loop while zero flag is clear
+    WhileClearZeroFlag,
+
+    /// Repeat/loop while zero flag is set
+    WhileSetZeroFlag
+}
+
 /// Decode a stream of bytes and return the decoded `Instruction`s
 pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
     let mut res = Vec::new();
@@ -27,6 +36,9 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             .into())
         }}
     }
+
+    // Currently set repeat prefix for string manipulation
+    let mut repeat = None;
 
     while !input.is_empty() {
         eprintln!("{:#x} | OP: {:#x}", 
@@ -595,15 +607,21 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 let size = 1;
 
                 (instr, size)
-
             }
             0b1111_0010 | 0b1111_0011 => {
-                let zero = input[0] & 1 == 1;
+                repeat = match input[0] & 1  {
+                    0 => Some(Repeat::WhileClearZeroFlag),
+                    1 => Some(Repeat::WhileSetZeroFlag),
 
-                // REP prefix
-                match opcode input[1] {
+                    // SAFETY: Unreachable due to the bitand above
+                    _ => unsafe { std::hint::unreachable_unchecked() }
+                };
 
-                }
+                // Update the instruction stream 
+                input = &input[1..];
+
+                // Force continue to avoid adding a dummy instruction
+                continue;
             }
             0b1111_1111 => {
                 let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1))?;
