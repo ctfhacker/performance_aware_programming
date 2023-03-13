@@ -538,7 +538,7 @@ impl std::fmt::Display for Instruction {
                 write!(f, "idiv {src}")
             }
             Instruction::Cmp { dest, src } => {
-                write!(f, "cmp  {dest}, {src}")
+                write!(f, "cmp {dest}, {src}")
             }
             Instruction::Neg { src } => {
                 write!(f, "neg {src}")
