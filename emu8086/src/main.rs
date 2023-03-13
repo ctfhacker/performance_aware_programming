@@ -7,6 +7,8 @@ mod instruction;
 mod memory;
 mod register;
 
+use crate::instruction::Instruction;
+
 fn main() -> Result<()> {
     let input_file = std::env::args()
         .nth(1)
@@ -19,7 +21,11 @@ fn main() -> Result<()> {
     println!("; Decoded from {input_file}");
     println!("bits 16");
     for instr in instrs {
-        println!("{instr}");
+        if matches!(instr, Instruction::Lock) {
+            print!("{instr}");
+        } else {
+            println!("{instr}");
+        }
     }
 
     Ok(())

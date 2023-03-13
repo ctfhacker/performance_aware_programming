@@ -1,6 +1,7 @@
-use crate::instruction::{Instruction, Mod, Operand, Reg, Rm, Wide};
+use crate::instruction::{Instruction, Mod, Operand, Reg, Rm, Wide, Repeat};
 use crate::memory::Memory;
 use crate::register::{Register, SegmentRegister};
+use std::collections::BTreeMap;
 
 use anyhow::Result;
 use thiserror::Error;
@@ -9,22 +10,18 @@ use thiserror::Error;
 pub enum DecoderError {
     #[error("Attempted to parse an unknown instruction at offset {1:#x}: {0:#x}")]
     UnknownInstruction(u8, usize),
-}
 
-#[derive(Debug, Copy, Clone)]
-pub enum Repeat {
-    /// Repeat/loop while zero flag is clear
-    WhileClearZeroFlag,
-
-    /// Repeat/loop while zero flag is set
-    WhileSetZeroFlag
+    #[error("Attempted to parse an unknown repeat opcode at offset {1:#x}: {0:#x}")]
+    UnknownRepeatOpcode(u8, usize),
 }
 
 /// Decode a stream of bytes and return the decoded `Instruction`s
 pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
     let mut res = Vec::new();
+    let mut addrs = Vec::new();
 
     let orig_input = input;
+    let mut labels: BTreeMap<usize, usize> = BTreeMap::new();
 
     macro_rules! unknown_instr {
         () => {{
@@ -37,14 +34,28 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
         }}
     }
 
-    // Currently set repeat prefix for string manipulation
-    let mut repeat = None;
+    let mut segment = None;
 
     while !input.is_empty() {
         eprintln!("{:#x} | OP: {:#x}", 
             input.as_ptr() as usize - orig_input.as_ptr() as usize,
             input[0]
         );
+
+        // Get the current instruction address
+        let address = input.as_ptr() as usize - orig_input.as_ptr() as usize;
+
+        /// Insert a jump/loop instruction with its label into the instruction stream
+        macro_rules! jump_instr {
+            ($jmp:ident) => {{
+                let offset = address.wrapping_add_signed(input[1] as i8 as isize);
+                let label_index = labels.len();
+                let label = labels.entry(offset).or_insert(label_index);
+                let instr = Instruction::$jmp { offset: input[1] as i8, label: Some(format!("label_{label}")) };
+                let size = 2;
+                (instr, size)
+            }}
+        }
 
         let (instr, size) = match input[0] {
             // <OPERATION> Register/memory to/from register
@@ -67,12 +78,12 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 let d = (input[0] >> 1) & 1 > 0;
 
                 // Parse the mod/reg/rm second byte
-                let (reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(w))?;
+                let (reg, rm, mut size) = parse_mod_reg_rm_instr(input, Wide(w), segment.take())?;
                 
                 // Align the src/dest to the proper position based on the `d` flag
                 let (dest, src) = if d {
                     (reg, rm)
-                } else {
+              } else {
                     (rm, reg)
                 };
 
@@ -85,20 +96,33 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     0b000110_00 => Instruction::Sbb { dest, src }, 
                     0b001110_00 => Instruction::Cmp { dest, src }, 
                     0b001000_00 => Instruction::And { dest, src }, 
-                    0b001100_00 => Instruction::Or  { dest, src }, 
+                    0b001100_00 => Instruction::Xor { dest, src }, 
+
+                    // ERROR IN MANUAL: This is the correct decoding for Test
                     0b100001_00 => Instruction::Test { dest, src }, 
                     0b111101_00 => {
                         let opcode = input[1] >> 3 & 0b111;
 
                         match opcode {
-                            0b000 => Instruction::Test { dest, src },
+                            0b000 => {
+                                let mut imm = input[size] as u16;
+                                size += 1;
+
+                                if w > 0 {
+                                    imm |= (input[size] as u16) << 8;
+                                    size += 1;
+                                }
+
+                                let src = Operand::Immediate(imm as i16);
+                                Instruction::Test { dest: rm, src }
+                            }
                             0b001 => unknown_instr!(),
-                            0b010  => Instruction::Not { src },
-                            0b011 =>  Instruction::Neg { src },
-                            0b100 =>  Instruction::Mul { dest, src },
-                            0b101 =>  Instruction::Imul { dest, src },
-                            0b110 =>  Instruction::Div { dest, src },
-                            0b111 =>  Instruction::Idiv { dest, src },
+                            0b010 => Instruction::Not { src },
+                            0b011 => Instruction::Neg { src },
+                            0b100 => Instruction::Mul { src },
+                            0b101 => Instruction::Imul { src },
+                            0b110 => Instruction::Div { src },
+                            0b111 => Instruction::Idiv { src },
                             // SAFETY: Bounded here by the bitand above
                             _ => unsafe { std::hint::unreachable_unchecked() }
                         }
@@ -117,21 +141,21 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                         let opcode = input[1] >> 3 & 0b111;
 
                         match opcode {
-                            0b000 => Instruction::Rol { src, count },
-                            0b001 => Instruction::Ror { src, count },
-                            0b010 => Instruction::Rcl { src, count },
-                            0b011 => Instruction::Rcr { src, count },
-                            0b100 => Instruction::Shl { src, count },
-                            0b101 => Instruction::Shr { src, count },
-                            0b111 => Instruction::Sar { src, count },
+                            0b000 => Instruction::Rol { src: rm, count },
+                            0b001 => Instruction::Ror { src: rm, count },
+                            0b010 => Instruction::Rcl { src: rm, count },
+                            0b011 => Instruction::Rcr { src: rm, count },
+                            0b100 => Instruction::Shl { src: rm, count },
+                            0b101 => Instruction::Shr { src: rm, count },
+                            0b111 => Instruction::Sar { src: rm, count },
                             _ => unknown_instr!()
                         }
                     }
                     0b111111_00 => {
                         if input[1] >> 3 & 0b111 == 0b000 {
-                            Instruction::Inc { dest }
+                            Instruction::Inc { src }
                         } else if input[1] >> 3 & 0b111 == 0b001 {
-                            Instruction::Dec { dest }
+                            Instruction::Dec { src }
                         } else {
                             unknown_instr!()
                         }
@@ -142,18 +166,15 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 (instr, size)
             }
             // <OPERATION> Immediate to register/memory
-            0b0010_1000..=0b0010_1011   // sub
-            | 0b1000_0000..=0b1000_0011 // sbb/cmp/and/add/adc/or
+            0b1000_0000..=0b1000_0011 // sbb/cmp/and/add/adc/or
             | 0b1100_0110..=0b1100_0111 // mov
-            | 0b0011_0100..=0b0011_0101 // mov
-            | 0b1111_0110..=0b1111_0111 // test
             => {
                 // Parse the bit fields
                 let wide = input[0] & 1;
                 let s = (input[0] >> 1) & 1;
 
                 // Parse the mod/reg/rm second byte
-                let (_, rm, mut size) = parse_mod_reg_rm_instr(input, Wide(wide))?;
+                let (_, rm, mut size) = parse_mod_reg_rm_instr(input, Wide(wide), segment.take())?;
 
                 // Continue parsing the immediate after the parsed size is there was
                 // a displacement or not
@@ -171,7 +192,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                         imm |= (input[size] as u16) << 8;
                         size += 1;
                     }
-                    x if wide > 0 && s == 0 => {
+                    _ if wide > 0 && s == 0 => {
                         // If wide bit is set, two cases arise:
                         // * Sign bit is it - the u8 becomes a u16 so the wide bit is satisfied
                         // * Sign not set - need a u16 immediate, so we need to read another byte
@@ -217,6 +238,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             | 0b0001_1100..=0b0001_1101 // sbb
             | 0b0011_0100..=0b0011_0101 // xor
             | 0b0011_1100..=0b0011_1101 // cmp
+            | 0b1010_1000..=0b1010_1001 // test
             => {
                 // Parse the bit fields
                 let wide = input[0] & 1;
@@ -244,6 +266,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     0b0011_0100 => Instruction::Xor { dest, src },
                     0b0011_1100 => Instruction::Cmp { dest, src },
                     0b0010_0100 => Instruction::And { dest, src },
+                    0b1010_1000 => Instruction::Test { dest, src },
                     _ => unknown_instr!()
                 };
 
@@ -286,7 +309,8 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 // Add the decoded instruction to the list
                 let instr = Instruction::Mov {
                     dest: Operand::Register(Register::Ax),
-                    src: Operand::Memory(Memory::direct_address(imm)),
+                    src: Operand::Memory(Memory::direct_address(imm, Wide(wide))
+                        .with_segment(segment.take())),
                 };
 
                 (instr, size)
@@ -304,7 +328,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
 
                 // Add the decoded instruction to the list
                 let instr = Instruction::Mov {
-                    dest: Operand::Memory(Memory::direct_address(imm)),
+                    dest: Operand::Memory(Memory::direct_address(imm, Wide(wide)).with_segment(segment)),
                     src: Operand::Register(Register::Ax),
                 };
 
@@ -312,7 +336,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // MOV Register/memory to segment register
             0b10001110 => {
-                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(&input)?;
+                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(&input, segment.take())?;
 
                 let instr = Instruction::Mov {
                     dest: Operand::SegmentRegister(segment_reg),
@@ -323,7 +347,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // MOV Register/memory to segment register
             0b1000_1100 => {
-                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(&input)?;
+                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(&input, segment.take())?;
 
                 let instr = Instruction::Mov {
                     dest: operand,
@@ -367,7 +391,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // POP register/memory
             0b1000_1111 => {
-                let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1))?;
+                let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1), segment.take())?;
 
                 let instr = Instruction::Pop { src: rm };
 
@@ -388,7 +412,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             // POP segment register
             0b000_00_111 | 0b000_01_111 | 0b000_10_111 | 0b000_11_111 => {
                 // Parse and convert the bits into a SegmentRegister
-                let segment_reg: SegmentRegister = match (input[1] >> 3) & 0b11 {
+                let segment_reg: SegmentRegister = match (input[0] >> 3) & 0b11 {
                     0b00 => SegmentRegister::Es,
                     0b01 => SegmentRegister::Cs,
                     0b10 => SegmentRegister::Ss,
@@ -408,7 +432,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             // XCHG register/memory with register
             0b1000_0110..=0b1000_0111 => {
                 let wide = Wide(input[0] & 1);
-                let (reg, rm, size) = parse_mod_reg_rm_instr(input, wide)?;
+                let (reg, rm, size) = parse_mod_reg_rm_instr(input, wide, segment.take())?;
 
                 let instr = Instruction::Xchg {
                     left: reg,
@@ -418,13 +442,14 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 (instr, size)
             }
             // XCHG with accumulator
-            0b1001_0000..=0b1001_0111 => {
+            0b1001_0001..=0b1001_0111 => {
                 let reg = Register::from_reg_w(Reg(input[0] & 0b111), Wide(1));
 
                 let instr = Instruction::Xchg {
                     left: Operand::Register(reg),
                     right: Operand::Register(Register::Ax),
                 };
+
 
                 let size = 1;
 
@@ -509,18 +534,37 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 (instr, size)
             }
             0b1000_1101 => {
-                let (reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1))?;
+                let (reg, mut rm, size) = parse_mod_reg_rm_instr(input, Wide(1), segment.take())?;
+
+                // Remove the memory size for a Memory src
+                if let Operand::Memory(ref mut memory) = &mut rm {
+                    memory.size = None;
+                }
+
                 let instr = Instruction::Lea { dest: reg, src: rm };
                 (instr, size)
             }
             0b1100_0101 => {
-                let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1))?;
-                let instr = Instruction::Lds { src: rm };
+                let (reg, mut rm, size) = parse_mod_reg_rm_instr(input, Wide(1), segment.take())?;
+
+                // Remove the memory size for a Memory src
+                if let Operand::Memory(ref mut memory) = &mut rm {
+                    memory.size = None;
+                }
+
+                let instr = Instruction::Lds { dest: reg, src: rm };
+
                 (instr, size)
             }
             0b1100_0100 => {
-                let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1))?;
-                let instr = Instruction::Les { src: rm };
+                let (reg, mut rm, size) = parse_mod_reg_rm_instr(input, Wide(1), segment.take())?;
+
+                // Remove the memory size for a Memory src
+                if let Operand::Memory(memory) = &mut rm {
+                    memory.size = None;
+                }
+
+                let instr = Instruction::Les { dest: reg, src: rm };
                 (instr, size)
             }
             0b1001_1111 => {
@@ -583,12 +627,12 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 let size = 1;
                 (instr, size)
             }
-            /// INC REG
+            // INC REG
             0b0100_0000..=0b0100_0111 => {
                 let reg = Register::from_reg_w(Reg(input[0] & 0b111), Wide(1));
 
                 let instr = Instruction::Inc {
-                    dest: Operand::Register(reg),
+                    src: Operand::Register(reg),
                 };
 
                 let size = 1;
@@ -596,12 +640,12 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 (instr, size)
 
             }
-            /// INC DEC
+            // INC DEC
             0b0100_1000..=0b0100_1111 => {
                 let reg = Register::from_reg_w(Reg(input[0] & 0b111), Wide(1));
 
                 let instr = Instruction::Dec  {
-                    dest: Operand::Register(reg),
+                    src: Operand::Register(reg),
                 };
 
                 let size = 1;
@@ -609,7 +653,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 (instr, size)
             }
             0b1111_0010 | 0b1111_0011 => {
-                repeat = match input[0] & 1  {
+                let repeat = match input[0] & 1  {
                     0 => Some(Repeat::WhileClearZeroFlag),
                     1 => Some(Repeat::WhileSetZeroFlag),
 
@@ -617,22 +661,209 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     _ => unsafe { std::hint::unreachable_unchecked() }
                 };
 
-                // Update the instruction stream 
-                input = &input[1..];
+                let instr = match input[1] {
+                    0b1010_0100 => Instruction::MoveByte { repeat },
+                    0b1010_0101 => Instruction::MoveWord { repeat },
+                    0b1010_0110 => Instruction::CmpByte { repeat },
+                    0b1010_0111 => Instruction::CmpWord { repeat },
+                    0b1010_1110 => Instruction::ScanByte { repeat },
+                    0b1010_1111 => Instruction::ScanWord { repeat },
+                    0b1010_1100 => Instruction::LoadByte { repeat },
+                    0b1010_1101 => Instruction::LoadWord { repeat },
+                    0b1010_1010 => Instruction::StoreByte { repeat },
+                    0b1010_1011 => Instruction::StoreWord { repeat },
+                    _ => return Err(DecoderError::UnknownRepeatOpcode(input[1],
+                        input.as_ptr() as usize - orig_input.as_ptr() as usize).into())
+                };
 
-                // Force continue to avoid adding a dummy instruction
+                (instr, 2)
+            }
+            0b1010_0100 => {
+                let size = 1;
+                let instr = Instruction::MoveByte { repeat: None };
+                (instr, size)
+            }
+            0b1010_0101 => {
+                let instr = Instruction::MoveWord { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_0110 => {
+                let instr = Instruction::CmpByte { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_0111 => {
+                let instr = Instruction::CmpWord { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_1110 => {
+                let instr = Instruction::ScanByte { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_1111 => {
+                let instr = Instruction::ScanWord { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_1100 => {
+                let instr = Instruction::LoadByte { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_1101 => {
+                let instr = Instruction::LoadWord { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_1010 => {
+                let instr = Instruction::StoreByte { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1010_1011 => {
+                let instr = Instruction::StoreWord { repeat: None };
+                let size = 1;
+                (instr, size)
+            }
+            0b1100_0010 => {
+                let offset = i16::from_le_bytes(input[1..3].try_into().unwrap());
+                let instr = Instruction::ReturnWithOffset { offset };
+                let size = 3;
+                (instr, size)
+            }
+            0b1100_0011 => {
+                let instr = Instruction::Return;
+                let size = 1;
+                (instr, size)
+            }
+            0b0111_0100 => jump_instr!(JumpEqual),
+            0b0111_0101 => jump_instr!(JumpNotEqual),
+            0b0111_1100 => jump_instr!(JumpLessThan),
+            0b0111_1110 => jump_instr!(JumpLessThanEqual),
+            0b0111_0010 => jump_instr!(JumpBelow),
+            0b0111_0110 => jump_instr!(JumpBelowEqual),
+            0b0111_1010 => jump_instr!(JumpParityEven),
+            0b0111_0000 => jump_instr!(JumpOverflow),
+            0b0111_1000 => jump_instr!(JumpSign),
+            0b0111_1101 => jump_instr!(JumpNotLessThan),
+            0b0111_1111 => jump_instr!(JumpNotLessThanEqual),
+            0b0111_0011 => jump_instr!(JumpNotBelow),
+            0b0111_0111 => jump_instr!(JumpNotBelowEqual),
+            0b0111_1011 => jump_instr!(JumpParityOdd),
+            0b0111_0001 => jump_instr!(JumpNotOverflow),
+            0b0111_1001 => jump_instr!(JumpNotSign),
+            0b1110_0010 => jump_instr!(Loop),
+            0b1110_0001 => jump_instr!(LoopWhileZero),
+            0b1110_0000 => jump_instr!(LoopWhileNotZero),
+            0b1110_0011 => jump_instr!(JumpCxZero),
+            0b1100_1101 => {
+                let instr = Instruction::Interrupt { vector: input[1] as u8 };
+                let size = 2;
+                (instr, size)
+            }
+            0b1100_1100 => {
+                let instr = Instruction::Interrupt { vector: 3 };
+                let size = 1;
+                (instr, size)
+            }
+            0b1100_1110 => {
+                let instr = Instruction::InterruptOnOverflow;
+                let size = 1;
+                (instr, size)
+            }
+            0b1100_1111 => {
+                let instr = Instruction::InterruptReturn;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_1000 => {
+                let instr = Instruction::ClearCarry;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_0101 => {
+                let instr = Instruction::ComplementCarry;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_1001 => {
+                let instr = Instruction::SetCarry;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_1100 => {
+                let instr = Instruction::ClearDirection;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_1101 => {
+                let instr = Instruction::SetDirection;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_1010 => {
+                let instr = Instruction::ClearInterrupt;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_1011 => {
+                let instr = Instruction::SetInterrupt;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_0100 => {
+                let instr = Instruction::Halt;
+                let size = 1;
+                (instr, size)
+            }
+            0b1001_1011 => {
+                let instr = Instruction::Wait;
+                let size = 1;
+                (instr, size)
+            }
+            0b1111_0000 => {
+                let instr = Instruction::Lock;
+                let size = 1;
+                (instr, size)
+            }
+            0b001_00_110 | 0b001_01_110  | 0b001_10_110  | 0b001_11_110 
+            => {
+                // Parse and convert the bits into a SegmentRegister
+                let segment_reg: SegmentRegister = match (input[0] >> 3) & 0b11 {
+                    0b00 => SegmentRegister::Es,
+                    0b01 => SegmentRegister::Cs,
+                    0b10 => SegmentRegister::Ss,
+                    0b11 => SegmentRegister::Ds,
+                    // SAFETY: Cannot be reached due to the bitand of 0b11 above
+                    _ => unsafe { std::hint::unreachable_unchecked() },
+                };
+
+                // Manually update the current segment 
+                segment = Some(segment_reg);
+
+                // Continue the instruction stream without inserting a new instruction
+                input= &input[1..];
+
                 continue;
             }
+               
             0b1111_1111 => {
-                let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1))?;
+                let (_reg, rm, size) = parse_mod_reg_rm_instr(input, Wide(1), segment.take())?;
 
                 let opcode = input[1] >> 3 & 0b111;
 
                 let instr = match opcode {
                     // INC mem16
-                    0b000 => Instruction::Inc { dest: rm },
+                    0b000 => Instruction::Inc { src: rm },
                     // DEC mem16
-                    0b001 => Instruction::Inc { dest: rm },
+                    0b001 => Instruction::Dec{ src: rm },
+                    // CALL mem16
+                    0b010 => Instruction::Call { dest: rm },
+                    // JUMP mem16
+                    0b100 => Instruction::Jump { dest: rm },
                     // PUSH mem16
                     0b110 => Instruction::Push { src: rm },
                     _ =>  unknown_instr!()
@@ -646,18 +877,41 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
         // Update the input bytes
         input = &input[size..];
 
+        // Force reset the segment override
+        segment = None;
+
         eprintln!("TEST: {instr:x?}");
         eprintln!("ASM:  {instr}");
 
         // Add the instruction to the instruction stream
         res.push(instr);
+
+        // Add the address of this instruction to the addrs list in order to
+        // discover where to insert labels
+        addrs.push(address);
+    }
+
+    // Insert the found labels into the instruction stream
+    for (address, label_index) in labels {
+        let name = format!("label_{label_index}");
+
+        match addrs.binary_search(&address) {
+            Ok(index) => {
+                res.insert(index + 1, Instruction::Label { name });
+                addrs.insert(index + 1, 0);
+            }
+            Err(index) => {
+                res.insert(index + 1, Instruction::Label { name });
+                addrs.insert(index + 1, 0);
+            }
+        }
     }
 
     Ok(res)
 }
 
 /// Parse an instruction with the "mod|reg|r/m" bit pattern
-pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide) -> Result<(Operand, Operand, usize)> {
+pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide, segment: Option<SegmentRegister>) -> Result<(Operand, Operand, usize)> {
     let rm = Rm((input[1] >> 0) & 0b111);
     let reg = Reg((input[1] >> 3) & 0b111);
     let mod_ = Mod((input[1] >> 6) & 0b11);
@@ -669,9 +923,9 @@ pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide) -> Result<(Operand, Oper
             // Special case the RM 0b110 case as a direct address
             let (mem, size) = if rm.0 == 0b110 {
                 let address = input[2] as u16 | (input[3] as u16) << 8;
-                (Memory::direct_address(address), 4)
+                (Memory::direct_address(address, wide).with_segment(segment), 4)
             } else {
-                (Memory::from_mod_rm(mod_, rm, wide)?, 2)
+                (Memory::from_mod_rm(mod_, rm, wide)?.with_segment(segment), 2)
             };
 
             (Operand::Register(reg), Operand::Memory(mem), size)
@@ -680,7 +934,9 @@ pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide) -> Result<(Operand, Oper
             let reg = Register::from_reg_w(reg, wide);
             let displacement = input[2] as i8 as i16;
 
-            let mem = Memory::from_mod_rm(mod_, rm, wide)?.with_displacement(displacement);
+            let mem = Memory::from_mod_rm(mod_, rm, wide)?
+                .with_displacement(displacement)
+                .with_segment(segment);
 
             (Operand::Register(reg), Operand::Memory(mem), 3)
         }
@@ -688,7 +944,9 @@ pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide) -> Result<(Operand, Oper
             let reg = Register::from_reg_w(reg, wide);
             let displacement = input[2] as i16 | (input[3] as i16) << 8;
 
-            let mem = Memory::from_mod_rm(mod_, rm, wide)?.with_displacement(displacement);
+            let mem = Memory::from_mod_rm(mod_, rm, wide)?
+                .with_displacement(displacement)
+                .with_segment(segment);
 
             (Operand::Register(reg), Operand::Memory(mem), 4)
         }
@@ -710,7 +968,7 @@ pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide) -> Result<(Operand, Oper
 }
 
 /// Parse an instruction with the "mod|segreg|r/m" bit pattern
-pub fn parse_mod_segreg_rm_instr(input: &[u8]) -> Result<(SegmentRegister, Operand, usize)> {
+pub fn parse_mod_segreg_rm_instr(input: &[u8], segment: Option<SegmentRegister>) -> Result<(SegmentRegister, Operand, usize)> {
     let rm = input[1] & 0b111;
     let mod_ = Mod((input[1] >> 6) & 0b11);
 
@@ -732,21 +990,27 @@ pub fn parse_mod_segreg_rm_instr(input: &[u8]) -> Result<(SegmentRegister, Opera
             // Special case the RM 0b110 case as a direct address
             let (mem, size) = if rm == 0b110 {
                 let address = input[2] as u16 | (input[3] as u16) << 8;
-                (Memory::direct_address(address), 4)
+                (Memory::direct_address(address, wide).with_segment(segment), 4)
             } else {
-                (Memory::from_mod_rm(mod_, Rm(rm), wide)?, 2)
+                (Memory::from_mod_rm(mod_, Rm(rm), wide)?.with_segment(segment), 2)
             };
 
             (segment_reg, Operand::Memory(mem), size)
         }
         0b01 => {
             let displacement = input[2] as i8 as i16;
-            let mem = Memory::from_mod_rm(mod_, Rm(rm), wide)?.with_displacement(displacement);
+            let mem = Memory::from_mod_rm(mod_, Rm(rm), wide)?
+                .with_displacement(displacement)
+                .with_segment(segment);
+
             (segment_reg, Operand::Memory(mem), 3)
         }
         0b10 => {
             let displacement = input[2] as i16 | (input[3] as i16) << 8;
-            let mem = Memory::from_mod_rm(mod_, Rm(rm), wide)?.with_displacement(displacement);
+            let mem = Memory::from_mod_rm(mod_, Rm(rm), wide)?
+                .with_displacement(displacement)
+                .with_segment(segment);
+
             (segment_reg, Operand::Memory(mem), 4)
         }
         0b11 => {

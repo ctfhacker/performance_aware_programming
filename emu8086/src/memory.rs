@@ -4,7 +4,7 @@ use anyhow::Result;
 use thiserror::Error;
 
 use crate::instruction::{Mod, Rm, Wide};
-use crate::register::Register;
+use crate::register::{Register, SegmentRegister};
 
 /// Possible errors while handling memory operands
 #[derive(Error, Debug)]
@@ -42,20 +42,35 @@ pub struct Memory {
     pub displacement: Option<i16>,
 
     /// Size of memory read
-    pub size: MemorySize,
+    pub size: Option<MemorySize>,
 
     /// Direct address for this memory operand
     pub address: Option<u16>,
+
+    /// Overridden segment
+    pub segment: Option<SegmentRegister>,
 }
 
 impl Memory {
+    pub fn with_segment(mut self, segment: Option<SegmentRegister>) -> Memory {
+        self.segment = segment;
+        self
+    }
+
     /// Create a direct address memory operand
-    pub fn direct_address(addr: u16) -> Memory {
+    pub fn direct_address(addr: u16, wide: Wide) -> Memory {
+        let size = match wide {
+            Wide(0) => MemorySize::Byte,
+            Wide(1) => MemorySize::Word,
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        };
+
         Memory {
             registers: [None; 2],
             displacement: None,
-            size: MemorySize::Word,
+            size: Some(size),
             address: Some(addr),
+            segment: None,
         }
     }
 
@@ -104,17 +119,22 @@ impl Memory {
             _ => return Err(MemoryError::InvalidRMValue(rm).into()),
         }
 
+        eprintln!("XCHG3 wide: {wide:?}");
+
         let size = match wide.0 {
             0 => MemorySize::Byte,
             1 => MemorySize::Word,
             _ => unsafe { std::hint::unreachable_unchecked() },
         };
 
+        eprintln!("XCHG4 size : {size:?}");
+
         Ok(Memory {
             registers,
             displacement: None,
-            size,
+            size: Some(size),
             address: None,
+            segment: None,
         })
     }
 
