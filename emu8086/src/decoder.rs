@@ -37,10 +37,12 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
     let mut segment = None;
 
     while !input.is_empty() {
+        /*
         eprintln!("{:#x} | OP: {:#x}", 
             input.as_ptr() as usize - orig_input.as_ptr() as usize,
             input[0]
         );
+        */
 
         // Get the current instruction address
         let address = input.as_ptr() as usize - orig_input.as_ptr() as usize;
@@ -180,7 +182,6 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 // a displacement or not
                 let mut imm = input[size] as u16;
                 size += 1;
-                dbg!(format!("{:b}", input[0]), wide, s);
 
                 // Handle the s/d bit for the various opcodes
                 match input[0] {
@@ -880,8 +881,8 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
         // Force reset the segment override
         segment = None;
 
-        eprintln!("TEST: {instr:x?}");
-        eprintln!("ASM:  {instr}");
+        // eprintln!("TEST: {instr:x?}");
+        // eprintln!("ASM:  {instr}");
 
         // Add the instruction to the instruction stream
         res.push(instr);

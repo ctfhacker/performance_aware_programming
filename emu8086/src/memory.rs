@@ -119,15 +119,11 @@ impl Memory {
             _ => return Err(MemoryError::InvalidRMValue(rm).into()),
         }
 
-        eprintln!("XCHG3 wide: {wide:?}");
-
         let size = match wide.0 {
             0 => MemorySize::Byte,
             1 => MemorySize::Word,
             _ => unsafe { std::hint::unreachable_unchecked() },
         };
-
-        eprintln!("XCHG4 size : {size:?}");
 
         Ok(Memory {
             registers,
