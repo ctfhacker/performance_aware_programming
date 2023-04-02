@@ -17,7 +17,7 @@ pub enum MemoryError {
 }
 
 /// Size of a memory read
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MemorySize {
     Byte,
     Word,
@@ -33,8 +33,8 @@ impl std::fmt::Display for MemorySize {
 }
 
 /// A memory operand
-#[derive(Debug, Copy, Clone)]
-pub struct Memory {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct MemoryOperand {
     /// Registers involved with this memory operand
     pub registers: [Option<Register>; 2],
 
@@ -51,21 +51,21 @@ pub struct Memory {
     pub segment: Option<SegmentRegister>,
 }
 
-impl Memory {
-    pub fn with_segment(mut self, segment: Option<SegmentRegister>) -> Memory {
+impl MemoryOperand {
+    pub fn with_segment(mut self, segment: Option<SegmentRegister>) -> Self {
         self.segment = segment;
         self
     }
 
     /// Create a direct address memory operand
-    pub fn direct_address(addr: u16, wide: Wide) -> Memory {
+    pub fn direct_address(addr: u16, wide: Wide) -> Self {
         let size = match wide {
             Wide(0) => MemorySize::Byte,
             Wide(1) => MemorySize::Word,
             _ => unsafe { std::hint::unreachable_unchecked() },
         };
 
-        Memory {
+        Self {
             registers: [None; 2],
             displacement: None,
             size: Some(size),
@@ -74,7 +74,7 @@ impl Memory {
         }
     }
 
-    pub fn from_mod_rm(mod_: Mod, rm: Rm, wide: Wide) -> Result<Memory> {
+    pub fn from_mod_rm(mod_: Mod, rm: Rm, wide: Wide) -> Result<Self> {
         let mod_ = mod_.0;
         let rm = rm.0;
 
@@ -107,10 +107,10 @@ impl Memory {
                 registers[0] = Some(Register::Di);
             }
             0b110 => {
-                if mod_ != 0b00 {
-                    registers[0] = Some(Register::Bp);
-                } else {
+                if mod_ == 0b00 {
                     // No registers set. RM b110 is Direct Address
+                } else {
+                    registers[0] = Some(Register::Bp);
                 }
             }
             0b111 => {
@@ -125,7 +125,7 @@ impl Memory {
             _ => unsafe { std::hint::unreachable_unchecked() },
         };
 
-        Ok(Memory {
+        Ok(Self {
             registers,
             displacement: None,
             size: Some(size),

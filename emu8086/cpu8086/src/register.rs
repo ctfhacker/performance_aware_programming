@@ -4,24 +4,26 @@ use crate::instruction::{Reg, Wide};
 use thiserror::Error;
 
 /// Register 8086 bank
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Register {
     Ax,
-    Al,
-    Ah,
     Bx,
-    Bl,
-    Bh,
     Cx,
-    Cl,
-    Ch,
     Dx,
-    Dl,
-    Dh,
     Si,
     Di,
     Sp,
     Bp,
+    Ip,
+    Flags,
+    Al,
+    Ah,
+    Bl,
+    Bh,
+    Cl,
+    Ch,
+    Dl,
+    Dh,
 }
 
 impl std::fmt::Display for Register {
@@ -43,6 +45,8 @@ impl std::fmt::Display for Register {
             Register::Di => write!(f, "di"),
             Register::Sp => write!(f, "sp"),
             Register::Bp => write!(f, "bp"),
+            Register::Ip => write!(f, "ip"),
+            Register::Flags => write!(f, "flags"),
         }
     }
 }
@@ -70,10 +74,20 @@ impl Register {
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
+
+    /// Convert the given register
+    pub fn as_zmm(self) -> u8 {
+        use Register::*;
+        match self {
+            Ax | Bx | Cx | Dx | Si | Di | Bp | Sp | Ip | Flags => self as usize as u8 + 1,
+            _ => panic!("zmm register for {self:?} is not implemented"),
+        }
+    }
 }
 
 /// An 8086 segment register
-#[derive(Debug, Copy, Clone)]
+#[allow(clippy::module_name_repetitions)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SegmentRegister {
     Es,
     Cs,

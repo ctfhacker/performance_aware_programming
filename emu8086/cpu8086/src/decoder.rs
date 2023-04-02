@@ -1,59 +1,54 @@
 use crate::instruction::{Instruction, Mod, Operand, Reg, Rm, Wide, Repeat};
-use crate::memory::Memory;
+use crate::memory_operand::MemoryOperand;
 use crate::register::{Register, SegmentRegister};
-use std::collections::BTreeMap;
+use crate::memory::{Memory, Address};
+use crate::emu::RegisterState;
+use crate::const_checks::{is_valid_address_size, If, True};
 
 use anyhow::Result;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum DecoderError {
-    #[error("Attempted to parse an unknown instruction at offset {1:#x}: {0:#x}")]
-    UnknownInstruction(u8, usize),
+pub enum Error {
+    #[error("Attempted to parse an unknown instruction at offset {1:x?}: {0:#x}")]
+    UnknownInstruction(u8, Address),
 
-    #[error("Attempted to parse an unknown repeat opcode at offset {1:#x}: {0:#x}")]
-    UnknownRepeatOpcode(u8, usize),
+    #[error("Attempted to parse an unknown repeat opcode at offset {1:x?}: {0:#x}")]
+    UnknownRepeatOpcode(u8, Address),
 }
 
-/// Decode a stream of bytes and return the decoded `Instruction`s
-pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
-    let mut res = Vec::new();
-    let mut addrs = Vec::new();
-
-    let orig_input = input;
-    let mut labels: BTreeMap<usize, usize> = BTreeMap::new();
+/// Decode the given byte stream into a set of [`Instruction`]
+#[allow(
+    clippy::too_many_lines, 
+    clippy::similar_names, 
+    clippy::cast_possible_wrap, 
+    clippy::unusual_byte_groupings,
+    clippy::verbose_bit_mask
+)]
+pub fn decode_instruction<const SIZE: usize>(cpu: &mut RegisterState, memory: &Memory<SIZE>)  
+    -> Result<Instruction> 
+where If<{ is_valid_address_size(SIZE) }>: True {
+    let address = Address(cpu.ip as usize);
 
     macro_rules! unknown_instr {
         () => {{
             println!("{}:{}", file!(), line!());
-            return Err(DecoderError::UnknownInstruction(
-                input[0],
-                input.as_ptr() as usize - orig_input.as_ptr() as usize,
-            )
+            return Err(Error::UnknownInstruction(memory.read::<u8>(address)?, address)
             .into())
         }}
     }
 
     let mut segment = None;
 
-    while !input.is_empty() {
-        /*
-        eprintln!("{:#x} | OP: {:#x}", 
-            input.as_ptr() as usize - orig_input.as_ptr() as usize,
-            input[0]
-        );
-        */
+    let mut input = &memory.memory[cpu.ip as usize..];
+    let res;
 
-        // Get the current instruction address
-        let address = input.as_ptr() as usize - orig_input.as_ptr() as usize;
-
+    loop {
         /// Insert a jump/loop instruction with its label into the instruction stream
         macro_rules! jump_instr {
             ($jmp:ident) => {{
-                let offset = address.wrapping_add_signed(input[1] as i8 as isize);
-                let label_index = labels.len();
-                let label = labels.entry(offset).or_insert(label_index);
-                let instr = Instruction::$jmp { offset: input[1] as i8, label: Some(format!("label_{label}")) };
+                // +2 since the instruction is 2 bytes
+                let instr = Instruction::$jmp { offset: input[1] as i8 + 2 };
                 let size = 2;
                 (instr, size)
             }}
@@ -96,7 +91,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     0b000100_00 => Instruction::Adc { dest, src }, 
                     0b001010_00 => Instruction::Sub { dest, src }, 
                     0b000110_00 => Instruction::Sbb { dest, src }, 
-                    0b001110_00 => Instruction::Cmp { dest, src }, 
+                    0b001110_00 => Instruction::Cmp { left: dest, right: src }, 
                     0b001000_00 => Instruction::And { dest, src }, 
                     0b001100_00 => Instruction::Xor { dest, src }, 
 
@@ -107,11 +102,11 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
 
                         match opcode {
                             0b000 => {
-                                let mut imm = input[size] as u16;
+                                let mut imm = u16::from(input[size]);
                                 size += 1;
 
                                 if w > 0 {
-                                    imm |= (input[size] as u16) << 8;
+                                    imm |= (u16::from(input[size])) << 8;
                                     size += 1;
                                 }
 
@@ -180,7 +175,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
 
                 // Continue parsing the immediate after the parsed size is there was
                 // a displacement or not
-                let mut imm = input[size] as u16;
+                let mut imm = i16::from(input[size] as i8);
                 size += 1;
 
                 // Handle the s/d bit for the various opcodes
@@ -190,14 +185,14 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     }
                     0b1100_0111 => {
                         // If we definitly have a wide move, get a u16 immediate
-                        imm |= (input[size] as u16) << 8;
+                        imm |= i16::from(input[size]) << 8;
                         size += 1;
                     }
                     _ if wide > 0 && s == 0 => {
                         // If wide bit is set, two cases arise:
                         // * Sign bit is it - the u8 becomes a u16 so the wide bit is satisfied
                         // * Sign not set - need a u16 immediate, so we need to read another byte
-                        imm |= (input[size] as u16) << 8;
+                        imm |= i16::from(input[size]) << 8;
                         size += 1;
                     }
                     _ => {
@@ -206,7 +201,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 }
 
                 let dest = rm;
-                let src = Operand::Immediate(imm as i16);
+                let src = Operand::Immediate(imm);
 
                 let instr = match input[1] >> 3 & 0b111 {
                     // Both MOV and ADD have same middle three bits in the second byte
@@ -224,7 +219,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     0b100 =>  Instruction::And { dest, src },
                     0b101 =>  Instruction::Sub { dest, src },
                     0b110 =>  Instruction::Xor { dest, src },
-                    0b111 =>  Instruction::Cmp { dest, src },
+                    0b111 =>  Instruction::Cmp { left: dest, right: src },
                     _ => unknown_instr!()
                 };
 
@@ -246,11 +241,11 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
 
                 let mut size = 1;
 
-                let mut imm = input[size] as u16;
+                let mut imm = u16::from(input[size]);
                 let mut accumulator = Register::Al;
                 size += 1;
                 if wide > 0 {
-                    imm |= (input[size] as u16) << 8;
+                    imm |= u16::from(input[size]) << 8;
                     size += 1;
                     accumulator = Register::Ax;
                 }
@@ -265,7 +260,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     0b0010_1100 => Instruction::Sub { dest, src },
                     0b0001_1100 => Instruction::Sbb { dest, src },
                     0b0011_0100 => Instruction::Xor { dest, src },
-                    0b0011_1100 => Instruction::Cmp { dest, src },
+                    0b0011_1100 => Instruction::Cmp { left: dest, right: src },
                     0b0010_0100 => Instruction::And { dest, src },
                     0b1010_1000 => Instruction::Test { dest, src },
                     _ => unknown_instr!()
@@ -281,11 +276,11 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 let reg = input[0] & 0b111;
                 let reg = Register::from_reg_w(Reg(reg), Wide(wide));
 
-                let mut imm = input[1] as u16;
+                let mut imm = u16::from(input[1]);
                 let mut size = 2;
                 if wide > 0 {
-                    imm |= (input[2] as u16) << 8;
-                    size += 1
+                    imm |= u16::from(input[2]) << 8;
+                    size += 1;
                 }
 
                 // Add the decoded instruction to the list
@@ -300,17 +295,17 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             0b1010_0000..=0b1010_0001 => {
                 // Parse the bit fields
                 let wide = input[0] & 1;
-                let mut imm = input[1] as u16;
+                let mut imm = u16::from(input[1]);
                 let mut size = 2;
                 if wide > 0 {
-                    imm |= (input[2] as u16) << 8;
-                    size += 1
+                    imm |= u16::from(input[2]) << 8;
+                    size += 1;
                 }
 
                 // Add the decoded instruction to the list
                 let instr = Instruction::Mov {
                     dest: Operand::Register(Register::Ax),
-                    src: Operand::Memory(Memory::direct_address(imm, Wide(wide))
+                    src: Operand::Memory(MemoryOperand::direct_address(imm, Wide(wide))
                         .with_segment(segment.take())),
                 };
 
@@ -320,24 +315,24 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             0b1010_0010..=0b1010_0011 => {
                 // Parse the bit fields
                 let wide = input[0] & 1;
-                let mut imm = input[1] as u16;
+                let mut imm = u16::from(input[1]);
                 let mut size = 2;
                 if wide > 0 {
-                    imm |= (input[2] as u16) << 8;
-                    size += 1
+                    imm |= u16::from(input[2]) << 8;
+                    size += 1;
                 }
 
                 // Add the decoded instruction to the list
                 let instr = Instruction::Mov {
-                    dest: Operand::Memory(Memory::direct_address(imm, Wide(wide)).with_segment(segment)),
+                    dest: Operand::Memory(MemoryOperand::direct_address(imm, Wide(wide)).with_segment(segment)),
                     src: Operand::Register(Register::Ax),
                 };
 
                 (instr, size)
             }
             // MOV Register/memory to segment register
-            0b10001110 => {
-                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(&input, segment.take())?;
+            0b1000_1110 => {
+                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(input, segment.take())?;
 
                 let instr = Instruction::Mov {
                     dest: Operand::SegmentRegister(segment_reg),
@@ -348,7 +343,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             }
             // MOV Register/memory to segment register
             0b1000_1100 => {
-                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(&input, segment.take())?;
+                let (segment_reg, operand, size) = parse_mod_segreg_rm_instr(input, segment.take())?;
 
                 let instr = Instruction::Mov {
                     dest: operand,
@@ -475,7 +470,8 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 let size = 2;
                 let instr = Instruction::In {
                     dest,
-                    src: Operand::Immediate(data as i16),
+                    src: Operand::Immediate(i16::from(data)),
+
                 };
                 (instr, size)
             }
@@ -507,7 +503,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
 
                 let size = 2;
                 let instr = Instruction::Out {
-                    dest: Operand::Immediate(port as i16),
+                    dest: Operand::Immediate(i16::from(port)),
                     src,
                 };
                 (instr, size)
@@ -673,8 +669,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                     0b1010_1101 => Instruction::LoadWord { repeat },
                     0b1010_1010 => Instruction::StoreByte { repeat },
                     0b1010_1011 => Instruction::StoreWord { repeat },
-                    _ => return Err(DecoderError::UnknownRepeatOpcode(input[1],
-                        input.as_ptr() as usize - orig_input.as_ptr() as usize).into())
+                    _ => return Err(Error::UnknownRepeatOpcode(input[1], address).into())
                 };
 
                 (instr, 2)
@@ -761,7 +756,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             0b1110_0000 => jump_instr!(LoopWhileNotZero),
             0b1110_0011 => jump_instr!(JumpCxZero),
             0b1100_1101 => {
-                let instr = Instruction::Interrupt { vector: input[1] as u8 };
+                let instr = Instruction::Interrupt { vector: input[1] };
                 let size = 2;
                 (instr, size)
             }
@@ -830,8 +825,7 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 let size = 1;
                 (instr, size)
             }
-            0b001_00_110 | 0b001_01_110  | 0b001_10_110  | 0b001_11_110 
-            => {
+            0b001_00_110 | 0b001_01_110  | 0b001_10_110  | 0b001_11_110 => {
                 // Parse and convert the bits into a SegmentRegister
                 let segment_reg: SegmentRegister = match (input[0] >> 3) & 0b11 {
                     0b00 => SegmentRegister::Es,
@@ -846,8 +840,12 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
                 segment = Some(segment_reg);
 
                 // Continue the instruction stream without inserting a new instruction
-                input= &input[1..];
+                input = &input[1..];
 
+                // Increment the IP from the CPU for reading this segment byte
+                cpu.ip += 1;
+
+                // Continue to parse the next instruction now that we've read this prefix
                 continue;
             }
                
@@ -875,67 +873,48 @@ pub fn decode_stream(mut input: &[u8]) -> Result<Vec<Instruction>> {
             _ => unknown_instr!()
         };
 
-        // Update the input bytes
-        input = &input[size..];
-
-        // Force reset the segment override
-        segment = None;
-
         // eprintln!("TEST: {instr:x?}");
         // eprintln!("ASM:  {instr}");
 
+        // Update the input bytes
+        cpu.ip += u16::try_from(size).unwrap();
+
         // Add the instruction to the instruction stream
-        res.push(instr);
+        res = Some(instr);
 
-        // Add the address of this instruction to the addrs list in order to
-        // discover where to insert labels
-        addrs.push(address);
+        break
     }
 
-    // Insert the found labels into the instruction stream
-    for (address, label_index) in labels {
-        let name = format!("label_{label_index}");
-
-        match addrs.binary_search(&address) {
-            Ok(index) => {
-                res.insert(index + 1, Instruction::Label { name });
-                addrs.insert(index + 1, 0);
-            }
-            Err(index) => {
-                res.insert(index + 1, Instruction::Label { name });
-                addrs.insert(index + 1, 0);
-            }
-        }
-    }
-
-    Ok(res)
+    Ok(res.unwrap())
 }
 
 /// Parse an instruction with the "mod|reg|r/m" bit pattern
 pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide, segment: Option<SegmentRegister>) -> Result<(Operand, Operand, usize)> {
-    let rm = Rm((input[1] >> 0) & 0b111);
-    let reg = Reg((input[1] >> 3) & 0b111);
+    let rm   = Rm(input[1] & 0b111);
+    let reg  = Reg((input[1] >> 3) & 0b111);
     let mod_ = Mod((input[1] >> 6) & 0b11);
 
-    let res = match mod_.0 {
+    let result = match mod_.0 {
         0b00 => {
             let reg = Register::from_reg_w(reg, wide);
 
             // Special case the RM 0b110 case as a direct address
             let (mem, size) = if rm.0 == 0b110 {
-                let address = input[2] as u16 | (input[3] as u16) << 8;
-                (Memory::direct_address(address, wide).with_segment(segment), 4)
+                let address = u16::from(input[2]) | u16::from(input[3]) << 8;
+                (MemoryOperand::direct_address(address, wide).with_segment(segment), 4)
             } else {
-                (Memory::from_mod_rm(mod_, rm, wide)?.with_segment(segment), 2)
+                (MemoryOperand::from_mod_rm(mod_, rm, wide)?.with_segment(segment), 2)
             };
 
             (Operand::Register(reg), Operand::Memory(mem), size)
         }
         0b01 => {
             let reg = Register::from_reg_w(reg, wide);
-            let displacement = input[2] as i8 as i16;
 
-            let mem = Memory::from_mod_rm(mod_, rm, wide)?
+            #[allow(clippy::cast_possible_wrap)]
+            let displacement = i16::from(input[2] as i8);
+
+            let mem = MemoryOperand::from_mod_rm(mod_, rm, wide)?
                 .with_displacement(displacement)
                 .with_segment(segment);
 
@@ -943,9 +922,9 @@ pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide, segment: Option<SegmentR
         }
         0b10 => {
             let reg = Register::from_reg_w(reg, wide);
-            let displacement = input[2] as i16 | (input[3] as i16) << 8;
+            let displacement = i16::from(input[2]) | i16::from(input[3]) << 8;
 
-            let mem = Memory::from_mod_rm(mod_, rm, wide)?
+            let mem = MemoryOperand::from_mod_rm(mod_, rm, wide)?
                 .with_displacement(displacement)
                 .with_segment(segment);
 
@@ -965,7 +944,7 @@ pub fn parse_mod_reg_rm_instr(input: &[u8], wide: Wide, segment: Option<SegmentR
         }
     };
 
-    Ok(res)
+    Ok(result)
 }
 
 /// Parse an instruction with the "mod|segreg|r/m" bit pattern
@@ -990,25 +969,26 @@ pub fn parse_mod_segreg_rm_instr(input: &[u8], segment: Option<SegmentRegister>)
         0b00 => {
             // Special case the RM 0b110 case as a direct address
             let (mem, size) = if rm == 0b110 {
-                let address = input[2] as u16 | (input[3] as u16) << 8;
-                (Memory::direct_address(address, wide).with_segment(segment), 4)
+                let address = u16::from(input[2]) | u16::from(input[3]) << 8;
+                (MemoryOperand::direct_address(address, wide).with_segment(segment), 4)
             } else {
-                (Memory::from_mod_rm(mod_, Rm(rm), wide)?.with_segment(segment), 2)
+                (MemoryOperand::from_mod_rm(mod_, Rm(rm), wide)?.with_segment(segment), 2)
             };
 
             (segment_reg, Operand::Memory(mem), size)
         }
         0b01 => {
-            let displacement = input[2] as i8 as i16;
-            let mem = Memory::from_mod_rm(mod_, Rm(rm), wide)?
+            #[allow(clippy::cast_possible_wrap)]
+            let displacement = i16::from(input[2] as i8);
+            let mem = MemoryOperand::from_mod_rm(mod_, Rm(rm), wide)?
                 .with_displacement(displacement)
                 .with_segment(segment);
 
             (segment_reg, Operand::Memory(mem), 3)
         }
         0b10 => {
-            let displacement = input[2] as i16 | (input[3] as i16) << 8;
-            let mem = Memory::from_mod_rm(mod_, Rm(rm), wide)?
+            let displacement = i16::from(input[2]) | i16::from(input[3]) << 8;
+            let mem = MemoryOperand::from_mod_rm(mod_, Rm(rm), wide)?
                 .with_displacement(displacement)
                 .with_segment(segment);
 
