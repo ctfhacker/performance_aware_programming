@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     // Print CPU speed of the processor running the emulator
     print_cpu_speed();
 
-    let TERM_WIDTH = 110;
+    let term_width = 110;
 
     // Read the input file to decode
     let input_file = std::env::args()
@@ -183,7 +183,7 @@ fn main() -> Result<()> {
         #[allow(clippy::cast_possible_truncation)]
         let core = rdtsc() as u8 % 20 + 1;
 
-        println!("+{:-^width$}+", " CPU Before ", width = TERM_WIDTH - 2);
+        println!("+{:-^width$}+", " CPU Before ", width = term_width - 2);
 
         jit_emu.print_cpu_state(Core(core));
 
@@ -198,7 +198,7 @@ fn main() -> Result<()> {
             }
         });
 
-        println!("+{:-^width$}+", " CPU After ", width = TERM_WIDTH - 2);
+        println!("+{:-^width$}+", " CPU After ", width = term_width - 2);
 
         jit_emu.print_cpu_state(Core(core));
     }
@@ -230,7 +230,7 @@ fn main() -> Result<()> {
     println!(
         "+{:-^width$}+",
         " Performance Stats ",
-        width = TERM_WIDTH - 2
+        width = term_width - 2
     );
 
     print_stat!(ReadInput);
