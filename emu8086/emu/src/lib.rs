@@ -1,6 +1,7 @@
 #![feature(stdsimd)]
 #![feature(portable_simd)]
 #![feature(concat_idents)]
+use cpu8086::flags::EFlags;
 use std::simd::u16x32;
 
 const LANES: u8 = 32;
@@ -56,6 +57,7 @@ impl JitEmulatorState {
             sp: self.sp.as_array()[cpu],
             bp: self.bp.as_array()[cpu],
             ip: self.ip.as_array()[cpu],
+            flags: self.flags.as_array()[cpu],
         }
     }
 
@@ -72,11 +74,27 @@ impl JitEmulatorState {
             sp,
             bp,
             ip,
+            flags,
         } = self.get_cpu_state(core);
+
+        // Create the FLAGS string
+        let mut eflags = String::new();
+        for (flag, ch) in [
+            (EFlags::Carry, "C"),
+            (EFlags::Parity, "P"),
+            (EFlags::Auxillary, "A"),
+            (EFlags::Zero, "Z"),
+            (EFlags::Sign, "S"),
+            (EFlags::Overflow, "O"),
+        ] {
+            if flags & (1 << flag as usize) > 0 {
+                eflags.push_str(ch);
+            }
+        }
 
         // Pretty print this core's register state
         println!("Core {:02}", *core);
-        println!("    IP: {ip:04x}");
+        println!("    IP: {ip:04x} FLAGS: {flags:04x} {eflags}");
         println!("    AX: {ax:04x} BX: {bx:04x} CX: {cx:04x} DX: {dx:04x}");
         println!("    SP: {sp:04x} BP: {bp:04x} SI: {si:04x} DI: {di:04x}");
     }
@@ -154,6 +172,7 @@ pub struct CpuState {
     sp: u16,
     bp: u16,
     ip: u16,
+    flags: u16,
 }
 
 #[derive(Default, Debug, Clone, Copy)]

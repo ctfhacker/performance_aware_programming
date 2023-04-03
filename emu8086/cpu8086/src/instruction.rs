@@ -3,8 +3,6 @@
 use crate::memory_operand::MemoryOperand;
 use crate::register::{Register, SegmentRegister};
 
-use jit::{AvxOperand, CmpOp, JitIL, Zmm};
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Operand {
     // A register operand
@@ -429,6 +427,7 @@ pub enum Instruction {
     // Label { name: String },
 }
 
+/*
 impl From<Operand> for AvxOperand {
     fn from(op: Operand) -> AvxOperand {
         match op {
@@ -475,6 +474,7 @@ impl From<Instruction> for JitIL {
         }
     }
 }
+*/
 
 impl std::fmt::Display for Instruction {
     #[allow(clippy::too_many_lines)]

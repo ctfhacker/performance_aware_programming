@@ -7,7 +7,10 @@ mod il;
 pub use il::{CmpOp, JitIL};
 
 mod evex;
-pub use evex::{evex, Avx512Instruction, AvxOpcode, AvxOperand, Zmm};
+pub use evex::{Avx512Instruction, AvxOpcode, AvxOperand, Kmask, Zmm};
+
+use cpu8086::flags::EFlags;
+use cpu8086::instruction::{Instruction, Operand};
 
 /// Enum used to identify the zmm register for each 8086 register
 /// Example::
@@ -26,12 +29,13 @@ pub enum JitRegister {
     sp,
     bp,
     ip,
+    flags,
 }
 
 impl JitRegister {
     /// Get the zmm register number this register uses in the JIT
-    pub fn as_zmm(self) -> usize {
-        self as usize
+    pub fn as_zmm(self) -> Zmm {
+        Zmm(self as u8)
     }
 }
 
@@ -126,6 +130,18 @@ impl<const N: usize> JitBuffer<N> {
         self.write_bytes(&bytes.as_slice());
     }
 
+    /// Move immediate using the k opmask
+    pub fn mov_imm_with_kmask(&mut self, dest: Zmm, imm: i16, kmask: Kmask) {
+        // Assemble: mov esi, VAL
+        let bytes = [0xbe];
+        self.write_bytes(&bytes);
+        self.write_bytes(&(imm as u32).to_le_bytes());
+
+        let instr = vpbroadcastw!(dest, rsi, kmask);
+        let bytes = instr.assemble();
+        self.write_bytes(&bytes.as_slice());
+    }
+
     pub fn mov(&mut self, dest: Zmm, src: Zmm) {
         let bytes = vpmovdqa64!(dest, src).assemble();
         self.write_bytes(&bytes.as_slice());
@@ -135,6 +151,38 @@ impl<const N: usize> JitBuffer<N> {
     pub fn sub(&mut self, dest: Zmm, op1: Zmm, op2: Zmm) {
         let bytes = vpsubw!(dest, op1, op2).assemble();
         self.write_bytes(&bytes.as_slice());
+
+        // Update status bits based on the result
+        self.set_zero_flag(dest);
+        self.set_sign_flag(dest);
+    }
+
+    /// Set the Zero Flag in the EFLAGS register if `dest` is zero
+    pub fn set_zero_flag(&mut self, dest: Zmm) {
+        // Fill a ZMM with zero
+        let zero_zmm = self.next_scratch_reg();
+        self.clear_zmm(zero_zmm);
+
+        let kmask = Kmask(3);
+        let tmp_flag_zmm = self.next_scratch_reg();
+        self.cmp(Zmm(kmask.0), dest, zero_zmm, CmpOp::Equal);
+        self.mov_imm_with_kmask(tmp_flag_zmm, 1 << (EFlags::Zero as usize), kmask);
+        let flags = JitRegister::flags.as_zmm();
+        self.or_with_kmask(flags, flags, tmp_flag_zmm, kmask);
+    }
+
+    /// Set the Sign Flag in the EFLAGS register if `dest` is less than zero
+    pub fn set_sign_flag(&mut self, dest: Zmm) {
+        // Fill a ZMM with zero
+        let zero_zmm = self.next_scratch_reg();
+        self.clear_zmm(zero_zmm);
+
+        let kmask = Kmask(3);
+        let tmp_flag_zmm = self.next_scratch_reg();
+        self.cmp(Zmm(kmask.0), dest, zero_zmm, CmpOp::LessThan);
+        self.mov_imm_with_kmask(tmp_flag_zmm, 1 << (EFlags::Sign as usize), kmask);
+        let flags = JitRegister::flags.as_zmm();
+        self.or_with_kmask(flags, flags, tmp_flag_zmm, kmask);
     }
 
     /// dest = op1 + op2
@@ -143,9 +191,31 @@ impl<const N: usize> JitBuffer<N> {
         self.write_bytes(&bytes.as_slice());
     }
 
+    /// dest = op1 || op2
+    pub fn or(&mut self, dest: Zmm, op1: Zmm, op2: Zmm) {
+        let bytes = vporw!(dest, op1, op2).assemble();
+        self.write_bytes(&bytes.as_slice());
+    }
+
+    /// dest = op1 || op2
+    pub fn or_with_kmask(&mut self, dest: Zmm, op1: Zmm, op2: Zmm, kmask: Kmask) {
+        let bytes = vporw!(dest, op1, op2, kmask).assemble();
+        self.write_bytes(&bytes.as_slice());
+    }
+
     /// k = left [`CmpOp`] right
     pub fn cmp(&mut self, k: Zmm, left: Zmm, right: Zmm, op: CmpOp) {
         let bytes = vpcmpw!(k, left, right, op).assemble();
+        self.write_bytes(&bytes.as_slice());
+    }
+
+    /// Write a `ret` instruction
+    pub fn ret(&mut self) {
+        self.write_bytes(&[0xc3]);
+    }
+
+    pub fn clear_zmm(&mut self, dest: Zmm) {
+        let bytes = vpxorq!(dest).assemble();
         self.write_bytes(&bytes.as_slice());
     }
 
@@ -291,6 +361,53 @@ impl<const N: usize> JitBuffer<N> {
     }
 }
 
+impl From<Operand> for AvxOperand {
+    fn from(op: Operand) -> AvxOperand {
+        match op {
+            Operand::Register(dest) => AvxOperand::Zmm(Zmm(dest.as_zmm())),
+            Operand::Immediate(imm) => AvxOperand::Immediate(imm),
+            _ => unimplemented!("{op:?}"),
+        }
+    }
+}
+
+impl From<Operand> for Zmm {
+    fn from(op: Operand) -> Zmm {
+        match op {
+            Operand::Register(dest) => Zmm(dest.as_zmm()),
+            _ => unimplemented!("Zmm {op:?}"),
+        }
+    }
+}
+
+impl From<Instruction> for JitIL {
+    fn from(instr: Instruction) -> JitIL {
+        match instr {
+            Instruction::Mov { dest, src } => JitIL::Mov {
+                dest: dest.into(),
+                src: src.into(),
+            },
+            Instruction::Sub { dest, src } => JitIL::Sub {
+                dest: dest.into(),
+                op1: dest.into(),
+                op2: src.into(),
+            },
+            Instruction::Add { dest, src } => JitIL::Add {
+                dest: dest.into(),
+                op1: dest.into(),
+                op2: src.into(),
+            },
+            Instruction::Cmp { left, right } => JitIL::Cmp {
+                k: Zmm(2),
+                left: left.into(),
+                right: right.into(),
+                op: CmpOp::Equal,
+            },
+            _ => unimplemented!("Impl JitIL for {instr:x?}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +432,6 @@ mod tests {
                 "{instr2:?} | {:x?} {needed:x?}",
                 bytes.as_slice(),
             );
-k        }
+        }
     }
 }

@@ -7,5 +7,4 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
-jit = { version = "0.1.0", path = "../jit" }
 thiserror = "1.0.40"

@@ -69,12 +69,16 @@ fn main() {
         vmovdqa64 [r15 + {bp_offset:#05x}], zmm{bp} # bp offset is {bp_offset:#05x}
         vmovdqa64 [r15 + {sp_offset:#05x}], zmm{sp} # sp offset is {sp_offset:#05x}
         vmovdqa64 [r15 + {ip_offset:#05x}], zmm{ip} # ip offset is {ip_offset:#05x}
+        vmovdqa64 [r15 + {flags_offset:#05x}], zmm{flags} # ip offset is {flags_offset:#05x}
 
         vmovdqa64 zmm1, zmm2
         vmovdqa64 zmm2, zmm1
 
-
-        vpbroadcastw zmm4, esi
+       
+        vpbroadcastw zmm1 {{{{k1}}}}, esi
+        vpbroadcastw zmm1 {{{{k2}}}}, esi
+        vpbroadcastw zmm1 {{{{k3}}}}, esi
+        vpbroadcastw zmm1 {{{{k4}}}}, esi
         vpbroadcastw zmm4, edi
         vpbroadcastw zmm4, eax
         vpbroadcastw zmm4, ebx

@@ -16,7 +16,7 @@ impl Zmm {
 
 /// A K opmask register
 #[derive(Debug, Copy, Clone)]
-pub struct K(pub u8);
+pub struct Kmask(pub u8);
 
 /// An AVX512 operand
 #[derive(Debug, Copy, Clone)]
@@ -33,6 +33,8 @@ pub enum AvxOpcode {
     Broadcast = 0x7b,
     Cmp = 0x3f,
     Add = 0xfd,
+    Or = 0xeb,
+    Xor = 0xef,
 }
 
 impl AvxOpcode {
@@ -45,6 +47,8 @@ impl AvxOpcode {
             Broadcast => PrefixMmm::F38,
             Cmp => PrefixMmm::F3A,
             Add => PrefixMmm::F,
+            Or => PrefixMmm::F,
+            Xor => PrefixMmm::F,
         }
     }
 
@@ -101,6 +105,7 @@ pub struct Avx512Instruction {
     op3: Option<Zmm>,
     opcode: Option<AvxOpcode>,
     imm: Option<u8>,
+    kmask: Option<Kmask>,
 }
 
 impl Avx512Instruction {
@@ -129,39 +134,32 @@ impl Avx512Instruction {
         self
     }
 
-    pub fn assemble(self) -> EvexResult {
-        assert!(
-            self.op1.is_some(),
-            "Cannot assemble AVX512 instruction without op1"
-        );
-        assert!(
-            self.op2.is_some(),
-            "Cannot assemble AVX512 instruction without op2"
-        );
-        assert!(
-            self.opcode.is_some(),
-            "Cannot assemble AVX512 instruction without opcode"
-        );
+    pub fn kmask(mut self, kmask: Kmask) -> Self {
+        self.kmask = Some(kmask);
+        self
+    }
 
-        evex(
-            self.opcode.unwrap(),
-            self.op1.unwrap(),
-            self.op2.unwrap(),
-            self.op3,
-            self.imm,
-        )
+    pub fn assemble(self) -> EvexResult {
+        evex(self)
     }
 }
 
 /// Reference: Section 2.7.1 in Intel® 64 and IA-32 Architectures Software Developer’s Manual
 /// Volume 2 (2A, 2B, 2C, & 2D): Instruction Set Reference, A-Z
-pub fn evex(
-    opcode: AvxOpcode,
-    op1: Zmm,
-    op2: Zmm,
-    op3: Option<Zmm>,
-    imm: Option<u8>,
-) -> EvexResult {
+fn evex(instr: Avx512Instruction) -> EvexResult {
+    let Avx512Instruction {
+        opcode,
+        op1,
+        op2,
+        op3,
+        imm,
+        kmask,
+    } = instr;
+
+    let op1 = op1.expect("Cannot assemble AVX512 instruction without op1");
+    let op2 = op2.expect("Cannot assemble AVX512 instruction without op2");
+    let opcode = opcode.expect("Cannot assemble AVX512 instruction without opcode");
+
     // Always 0x62 evex prefix
     let evex_prefix = 0x62;
 
@@ -210,7 +208,9 @@ pub fn evex(
         vprime = !op2.needs_5_bits() as u8;
     }
     vprime = vprime & 1;
-    let aaa = 0;
+    let aaa = kmask.unwrap_or_else(|| Kmask(0)).0;
+    assert!(aaa <= 8, "k value is larger than 8");
+
     let p2 = (z << 7) | (ll << 5) | (b << 4) | (vprime << 3) | aaa;
 
     // Construct the modrm for this instruction

@@ -99,6 +99,14 @@ macro_rules! vpbroadcastw {
             .op1($op1)
             .op2(HostRegister::$reg.as_zmm())
     };
+
+    ($op1:expr, $reg:ident, $k:expr) => {
+        Avx512Instruction::default()
+            .opcode(AvxOpcode::Broadcast)
+            .op1($op1)
+            .op2(HostRegister::$reg.as_zmm())
+            .kmask($k)
+    };
 }
 
 #[macro_export]
@@ -108,5 +116,36 @@ macro_rules! vpmovdqa64 {
             .opcode(AvxOpcode::Mov)
             .op1($op1)
             .op2($op2)
+    };
+}
+
+#[macro_export]
+macro_rules! vpxorq {
+    ($op:expr) => {
+        Avx512Instruction::default()
+            .opcode(AvxOpcode::Xor)
+            .op1($op)
+            .op2($op)
+            .op3($op)
+    };
+}
+
+#[macro_export]
+macro_rules! vporw {
+    ($op1:expr, $op2:expr, $op3:expr) => {
+        Avx512Instruction::default()
+            .opcode(AvxOpcode::Or)
+            .op1($op1)
+            .op2($op2)
+            .op3($op3)
+    };
+
+    ($op1:expr, $op2:expr, $op3:expr, $k:expr) => {
+        Avx512Instruction::default()
+            .opcode(AvxOpcode::Or)
+            .op1($op1)
+            .op2($op2)
+            .op3($op3)
+            .kmask($k)
     };
 }
