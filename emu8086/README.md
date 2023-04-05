@@ -7,64 +7,81 @@ This emulator attempts to create an 8086 vectorized emulator using AVX512. This 
 Aware Programming series continues.
 
 ```
-CPU Speed: 3.9 GHz
-Number of iterations: 0x1
-
-0x000 add bx, 0x7530       | mov esi, 0x7530
-                           | vpbroadcastw zmm28, esi
-                           | vpaddw zmm2, zmm2, zmm28
-------------------------------------------------------------
-0x004 add bx, 0x2710       | mov esi, 0x2710
-                           | vpbroadcastw zmm29, esi
-                           | vpaddw zmm2, zmm2, zmm29
-------------------------------------------------------------
-0x008 sub bx, 0xff88       | mov esi, 0xffffff88
-                           | vpbroadcastw zmm30, esi
-                           | vpsubw zmm2, zmm2, zmm30
-------------------------------------------------------------
-0x00c sub bx, 0xff88       | mov esi, 0xffffff88
-                           | vpbroadcastw zmm31, esi
-                           | vpsubw zmm2, zmm2, zmm31
-------------------------------------------------------------
-0x010 mov bx, 0x1          | mov esi, 0x1
-                           | vpbroadcastw zmm2, esi
-------------------------------------------------------------
-0x013 mov cx, 0x64         | mov esi, 0x64
-                           | vpbroadcastw zmm3, esi
-------------------------------------------------------------
-0x016 add bx, cx           | vpaddw zmm2, zmm2, zmm3
-------------------------------------------------------------
-0x018 mov dx, 0xa          | mov esi, 0xa
-                           | vpbroadcastw zmm4, esi
-------------------------------------------------------------
-0x01b sub cx, dx           | vpsubw zmm3, zmm3, zmm4
-------------------------------------------------------------
-0x01d add bx, 0x9c40       | mov esi, 0xffff9c40
-                           | vpbroadcastw zmm28, esi
-                           | vpaddw zmm2, zmm2, zmm28
-------------------------------------------------------------
-0x021 add cx, 0xffa6       | mov esi, 0xffffffa6
-                           | vpbroadcastw zmm29, esi
-                           | vpaddw zmm3, zmm3, zmm29
-------------------------------------------------------------
-0x024 mov sp, 0x63         | mov esi, 0x63
+0x008 mov sp, 0x3e6        | mov esi, 0x3e6
                            | vpbroadcastw zmm7, esi
 ------------------------------------------------------------
-0x027 mov bp, 0x62         | mov esi, 0x62
+0x00b mov bp, 0x3e7        | mov esi, 0x3e7
                            | vpbroadcastw zmm8, esi
 ------------------------------------------------------------
-0x02a cmp bp, sp           | vpcmpeqw k2, zmm8, zmm7
+0x00e cmp bp, sp           | vpsubw zmm30, zmm8, zmm7
+                           | mov esi, 0xffffffbf
+                           | vpbroadcastw zmm31, esi
+                           | vpandd zmm10, zmm10, zmm31
+                           | vpxord zmm24, zmm24, zmm24
+                           | vpcmpeqw k5, zmm30, zmm24
+                           | mov esi, 0x40
+                           | vpbroadcastw zmm25{k5}, esi
+                           | vpord zmm10{k5}, zmm10, zmm25
+                           | mov esi, 0xffffff7f
+                           | vpbroadcastw zmm26, esi
+                           | vpandd zmm10, zmm10, zmm26
+                           | vpxord zmm27, zmm27, zmm27
+                           | vpcmpltw k6, zmm30, zmm27
+                           | mov esi, 0x80
+                           | vpbroadcastw zmm28{k6}, esi
+                           | vpord zmm10{k6}, zmm10, zmm28
+------------------------------------------------------------
+0x010 add bp, 0x403        | mov esi, 0x403
+                           | vpbroadcastw zmm29, esi
+                           | vpaddw zmm8, zmm8, zmm29
+                           | mov esi, 0xffffffbf
+                           | vpbroadcastw zmm30, esi
+                           | vpandd zmm10, zmm10, zmm30
+                           | vpxord zmm31, zmm31, zmm31
+                           | vpcmpeqw k3, zmm8, zmm31
+                           | mov esi, 0x40
+                           | vpbroadcastw zmm24{k3}, esi
+                           | vpord zmm10{k3}, zmm10, zmm24
+                           | mov esi, 0xffffff7f
+                           | vpbroadcastw zmm25, esi
+                           | vpandd zmm10, zmm10, zmm25
+                           | vpxord zmm26, zmm26, zmm26
+                           | vpcmpltw k4, zmm8, zmm26
+                           | mov esi, 0x80
+                           | vpbroadcastw zmm27{k4}, esi
+                           | vpord zmm10{k4}, zmm10, zmm27
+------------------------------------------------------------
+0x014 sub bp, 0x7ea        | mov esi, 0x7ea
+                           | vpbroadcastw zmm28, esi
+                           | vpsubw zmm8, zmm8, zmm28
+                           | mov esi, 0xffffffbf
+                           | vpbroadcastw zmm29, esi
+                           | vpandd zmm10, zmm10, zmm29
+                           | vpxord zmm30, zmm30, zmm30
+                           | vpcmpeqw k5, zmm8, zmm30
+                           | mov esi, 0x40
+                           | vpbroadcastw zmm31{k5}, esi
+                           | vpord zmm10{k5}, zmm10, zmm31
+                           | mov esi, 0xffffff7f
+                           | vpbroadcastw zmm24, esi
+                           | vpandd zmm10, zmm10, zmm24
+                           | vpxord zmm25, zmm25, zmm25
+                           | vpcmpltw k6, zmm8, zmm25
+                           | mov esi, 0x80
+                           | vpbroadcastw zmm26{k6}, esi
+                           | vpord zmm10{k6}, zmm10, zmm26
 
-+--------------------------------------------- CPU Before ---------------------------------------------+
-Core 07
-    IP: 0000
++------------------- CPU Before -----------------------------+
+Core 12
+    IP: 0000 FLAGS: 0000
     AX: 0000 BX: 0000 CX: 0000 DX: 0000
     SP: 0000 BP: 0000 SI: 0000 DI: 0000
-+--------------------------------------------- CPU After ----------------------------------------------+
-Core 07
-    IP: 0000
-    AX: 0000 BX: 9ca5 CX: 0000 DX: 000a
-    SP: 0063 BP: 0062 SI: 0000 DI: 0000
++------------------- CPU After ------------------------------+
+Core 12
+    IP: 0000 FLAGS: 0040 Z
+    AX: 0000 BX: e102 CX: 0f01 DX: 0000
+    SP: 03e6 BP: 0000 SI: 0000 DI: 0000
+
 ```
 
 ## Decoding Tests
