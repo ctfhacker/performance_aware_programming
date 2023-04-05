@@ -241,3 +241,170 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cpu8086::flags::EFlags;
+    use cpu8086::instruction::Operand;
+    use cpu8086::register::Register;
+    use std::arch::asm;
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn test_instrs() {
+        // Initialize the JIT emulator used for all tests
+        let mut clean_jit_emu = JitEmulatorState::default();
+        clean_jit_emu.set_ax(0x4);
+        clean_jit_emu.set_bx(0x3);
+        clean_jit_emu.set_cx(0x2);
+        clean_jit_emu.set_dx(0x1);
+        clean_jit_emu.set_si(0x5);
+        clean_jit_emu.set_di(0x6);
+        clean_jit_emu.set_bp(0x8);
+        clean_jit_emu.set_sp(0x1);
+
+        let mut jit = JitBuffer::<{ 1024 * 1024 }>::new();
+
+        for (instr, check) in [
+            (
+                // sub ax, bx
+                Instruction::Sub {
+                    dest: Operand::Register(Register::Ax),
+                    src: Operand::Register(Register::Bx),
+                },
+                vec![(Register::Ax, 1)],
+            ),
+            (
+                // sub bx, bx
+                Instruction::Sub {
+                    dest: Operand::Register(Register::Bx),
+                    src: Operand::Register(Register::Bx),
+                },
+                vec![(Register::Bx, 0)],
+            ),
+            (
+                // mov bp, 0x1234
+                Instruction::Mov {
+                    dest: Operand::Register(Register::Bp),
+                    src: Operand::Immediate(0x1234),
+                },
+                vec![(Register::Bp, 0x1234)],
+            ),
+            (
+                // mov si, di
+                Instruction::Mov {
+                    dest: Operand::Register(Register::Si),
+                    src: Operand::Register(Register::Di),
+                },
+                vec![(Register::Si, 6), (Register::Di, 6)],
+            ),
+            (
+                // add ax, -1
+                Instruction::Add {
+                    dest: Operand::Register(Register::Ax),
+                    src: Operand::Immediate(-1),
+                },
+                vec![(Register::Ax, 3), (Register::Flags, 0)],
+            ),
+            (
+                // sub ax, ax
+                Instruction::Sub {
+                    dest: Operand::Register(Register::Ax),
+                    src: Operand::Register(Register::Ax),
+                },
+                vec![(Register::Ax, 0), (Register::Flags, EFlags::Zero as u16)],
+            ),
+            (
+                // cmp ax, ax
+                Instruction::Cmp {
+                    left: Operand::Register(Register::Ax),
+                    right: Operand::Register(Register::Ax),
+                },
+                vec![(Register::Ax, 4), (Register::Flags, EFlags::Zero as u16)],
+            ),
+            (
+                // cmp bx, ax
+                Instruction::Cmp {
+                    left: Operand::Register(Register::Bx),
+                    right: Operand::Register(Register::Ax),
+                },
+                vec![
+                    (Register::Bx, 3),
+                    (Register::Ax, 4),
+                    (Register::Flags, EFlags::Sign as u16),
+                ],
+            ),
+        ] {
+            // Copy the default CPU state
+            let jit_emu = clean_jit_emu.clone();
+
+            // Get the current offset in the JIT where this instruction will be written
+            let offset = jit.offset;
+
+            // Write this instruction
+            jit.write_instr(instr.clone());
+
+            // Execute the JIT buffer
+            let debug_on = false;
+            unsafe {
+                asm!(include_str!("../.tmp_files/findme.rs"),
+                    in("r13") usize::from(debug_on),
+                    in("r14") jit.buffer().offset(offset) as usize,
+                    in("r15") &jit_emu,
+                );
+            }
+
+            // Debug print the JIT assembly for the decoded instruction
+            /*
+            println!("--- {instr:?} ---");
+            let jit_instr = jit.get_disassembly_between(offset, jit.offset);
+            for (i, line) in jit_instr.iter().enumerate() {
+                println!("{i:02x} {line}");
+            }
+
+            jit_emu.print_cpu_state(Core(1));
+            */
+
+            for (check_reg, check_val) in check {
+                // Ensure all cores have the same result
+                for core in 0..32 {
+                    let state = jit_emu.get_cpu_state(Core(core));
+                    match check_reg {
+                        Register::Ax => {
+                            assert_eq!(state.ax, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Bx => {
+                            assert_eq!(state.bx, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Cx => {
+                            assert_eq!(state.cx, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Dx => {
+                            assert_eq!(state.dx, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Sp => {
+                            assert_eq!(state.sp, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Bp => {
+                            assert_eq!(state.bp, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Di => {
+                            assert_eq!(state.di, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Si => {
+                            assert_eq!(state.si, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Ip => {
+                            assert_eq!(state.ip, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        Register::Flags => {
+                            assert_eq!(state.flags, check_val, "Failed {instr:?} {check_reg:?}")
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+    }
+}

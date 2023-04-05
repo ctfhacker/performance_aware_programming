@@ -83,7 +83,7 @@ macro_rules! vpaddw {
 macro_rules! vpcmpw {
     ($op1:expr, $op2:expr, $op3:expr, $cmp:expr) => {
         Avx512Instruction::default()
-            .opcode(AvxOpcode::Cmp)
+            .opcode(AvxOpcode::SignedCmp)
             .op1($op1)
             .op2($op2)
             .op3($op3)
@@ -143,6 +143,26 @@ macro_rules! vporw {
     ($op1:expr, $op2:expr, $op3:expr, $k:expr) => {
         Avx512Instruction::default()
             .opcode(AvxOpcode::Or)
+            .op1($op1)
+            .op2($op2)
+            .op3($op3)
+            .kmask($k)
+    };
+}
+
+#[macro_export]
+macro_rules! vpandw {
+    ($op1:expr, $op2:expr, $op3:expr) => {
+        Avx512Instruction::default()
+            .opcode(AvxOpcode::And)
+            .op1($op1)
+            .op2($op2)
+            .op3($op3)
+    };
+
+    ($op1:expr, $op2:expr, $op3:expr, $k:expr) => {
+        Avx512Instruction::default()
+            .opcode(AvxOpcode::And)
             .op1($op1)
             .op2($op2)
             .op3($op3)

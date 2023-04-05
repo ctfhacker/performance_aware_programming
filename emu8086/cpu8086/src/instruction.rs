@@ -109,7 +109,7 @@ pub enum Repeat {
 }
 
 /// An 8086 decoded instruction
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Instruction {
     /// A mov instruction
     ///

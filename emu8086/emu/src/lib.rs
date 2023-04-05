@@ -7,7 +7,7 @@ use std::simd::u16x32;
 const LANES: u8 = 32;
 
 /// An vectorized emulator state of 32 simulated 8086 processors
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct JitEmulatorState {
     pub ax: u16x32,
     pub bx: u16x32,
@@ -87,7 +87,7 @@ impl JitEmulatorState {
             (EFlags::Sign, "S"),
             (EFlags::Overflow, "O"),
         ] {
-            if flags & (1 << flag as usize) > 0 {
+            if flags & flag as u16 > 0 {
                 eflags.push_str(ch);
             }
         }
@@ -163,16 +163,16 @@ impl_offset!(8086 flags, flags_offset);
 /// A single lane's CPU state
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct CpuState {
-    ax: u16,
-    bx: u16,
-    cx: u16,
-    dx: u16,
-    si: u16,
-    di: u16,
-    sp: u16,
-    bp: u16,
-    ip: u16,
-    flags: u16,
+    pub ax: u16,
+    pub bx: u16,
+    pub cx: u16,
+    pub dx: u16,
+    pub si: u16,
+    pub di: u16,
+    pub sp: u16,
+    pub bp: u16,
+    pub ip: u16,
+    pub flags: u16,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -214,3 +214,9 @@ impl_reg!(ax, set_ax, set_ax_in);
 impl_reg!(bx, set_bx, set_bx_in);
 impl_reg!(cx, set_cx, set_cx_in);
 impl_reg!(dx, set_dx, set_dx_in);
+impl_reg!(bp, set_bp, set_bp_in);
+impl_reg!(sp, set_sp, set_sp_in);
+impl_reg!(di, set_di, set_di_in);
+impl_reg!(si, set_si, set_si_in);
+impl_reg!(ip, set_ip, set_ip_in);
+impl_reg!(flags, set_flags, set_flags_in);

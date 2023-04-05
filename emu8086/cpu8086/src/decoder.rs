@@ -175,33 +175,40 @@ where If<{ is_valid_address_size(SIZE) }>: True {
 
                 // Continue parsing the immediate after the parsed size is there was
                 // a displacement or not
-                let mut imm = i16::from(input[size] as i8);
+                let mut imm = input[size] as u8;
                 size += 1;
 
                 // Handle the s/d bit for the various opcodes
-                match input[0] {
+                let imm= match input[0] {
                     0b1100_0110 => {
                         // Do not get a u16 immediate for a byte mov
+                        // imm as u16
+                        0xdead
+
                     }
                     0b1100_0111 => {
                         // If we definitly have a wide move, get a u16 immediate
-                        imm |= i16::from(input[size]) << 8;
+                        let res = imm as u16 | u16::from(input[size]) << 8;
                         size += 1;
+                        res
                     }
                     _ if wide > 0 && s == 0 => {
                         // If wide bit is set, two cases arise:
                         // * Sign bit is it - the u8 becomes a u16 so the wide bit is satisfied
                         // * Sign not set - need a u16 immediate, so we need to read another byte
-                        imm |= i16::from(input[size]) << 8;
+                        let res = imm as u16 | (u16::from(input[size]) << 8);
                         size += 1;
+                        res
                     }
                     _ => {
+                        // imm as u16
+                        0xdead
                         // Do nothing here
                     }
-                }
+                };
 
                 let dest = rm;
-                let src = Operand::Immediate(imm);
+                let src = Operand::Immediate(imm as i16);
 
                 let instr = match input[1] >> 3 & 0b111 {
                     // Both MOV and ADD have same middle three bits in the second byte

@@ -74,10 +74,16 @@ pub struct JitBuffer<const N: usize> {
     pub offset: isize,
 
     /// Scratch registers available to be allocated during the JIT
-    scratch_registers: [Zmm; 4],
+    scratch_registers: [Zmm; 8],
 
     /// The current index for allocating a new scratch register
     scratch_registers_index: usize,
+
+    /// Scratch kmask to be allocated during the JIT
+    scratch_kmask: [Kmask; 4],
+
+    /// The current index for allocating a new scratch kmask
+    scratch_kmask_index: usize,
 }
 
 impl<const N: usize> JitBuffer<N> {
@@ -95,8 +101,19 @@ impl<const N: usize> JitBuffer<N> {
         JitBuffer {
             buffer,
             offset: 0,
-            scratch_registers: [Zmm(28), Zmm(29), Zmm(30), Zmm(31)],
+            scratch_registers: [
+                Zmm(24),
+                Zmm(25),
+                Zmm(26),
+                Zmm(27),
+                Zmm(28),
+                Zmm(29),
+                Zmm(30),
+                Zmm(31),
+            ],
             scratch_registers_index: 0,
+            scratch_kmask: [Kmask(3), Kmask(4), Kmask(5), Kmask(6)],
+            scratch_kmask_index: 0,
         }
     }
 
@@ -110,6 +127,13 @@ impl<const N: usize> JitBuffer<N> {
         let reg = self.scratch_registers[self.scratch_registers_index];
         self.scratch_registers_index =
             (self.scratch_registers_index + 1) % self.scratch_registers.len();
+        reg
+    }
+
+    /// Get the next available scratch kmask
+    pub fn next_scratch_kmask(&mut self) -> Kmask {
+        let reg = self.scratch_kmask[self.scratch_kmask_index];
+        self.scratch_kmask_index = (self.scratch_kmask_index + 1) % self.scratch_kmask.len();
         reg
     }
 
@@ -153,34 +177,47 @@ impl<const N: usize> JitBuffer<N> {
         self.write_bytes(&bytes.as_slice());
 
         // Update status bits based on the result
-        self.set_zero_flag(dest);
-        self.set_sign_flag(dest);
+        self.set_zero_flag_if_needed(dest);
+        self.set_sign_flag_if_needed(dest);
     }
 
     /// Set the Zero Flag in the EFLAGS register if `dest` is zero
-    pub fn set_zero_flag(&mut self, dest: Zmm) {
+    pub fn set_zero_flag_if_needed(&mut self, dest: Zmm) {
+        // Clear the existing zero bit
+        let tmp_zmm = self.next_scratch_reg();
+        self.mov_imm(tmp_zmm, !(EFlags::Zero as i16));
+        let flags = JitRegister::flags.as_zmm();
+        self.and(flags, flags, tmp_zmm);
+
         // Fill a ZMM with zero
         let zero_zmm = self.next_scratch_reg();
         self.clear_zmm(zero_zmm);
 
-        let kmask = Kmask(3);
+        let kmask = self.next_scratch_kmask();
         let tmp_flag_zmm = self.next_scratch_reg();
         self.cmp(Zmm(kmask.0), dest, zero_zmm, CmpOp::Equal);
-        self.mov_imm_with_kmask(tmp_flag_zmm, 1 << (EFlags::Zero as usize), kmask);
+        self.mov_imm_with_kmask(tmp_flag_zmm, EFlags::Zero as i16, kmask);
         let flags = JitRegister::flags.as_zmm();
         self.or_with_kmask(flags, flags, tmp_flag_zmm, kmask);
     }
 
     /// Set the Sign Flag in the EFLAGS register if `dest` is less than zero
-    pub fn set_sign_flag(&mut self, dest: Zmm) {
+    pub fn set_sign_flag_if_needed(&mut self, dest: Zmm) {
+        // Clear the existing sign bit
+        let tmp_zmm = self.next_scratch_reg();
+        self.mov_imm(tmp_zmm, !(EFlags::Sign as i16));
+        let flags = JitRegister::flags.as_zmm();
+        self.and(flags, flags, tmp_zmm);
+
         // Fill a ZMM with zero
         let zero_zmm = self.next_scratch_reg();
         self.clear_zmm(zero_zmm);
 
-        let kmask = Kmask(3);
+        let kmask = self.next_scratch_kmask();
         let tmp_flag_zmm = self.next_scratch_reg();
         self.cmp(Zmm(kmask.0), dest, zero_zmm, CmpOp::LessThan);
-        self.mov_imm_with_kmask(tmp_flag_zmm, 1 << (EFlags::Sign as usize), kmask);
+        self.mov_imm_with_kmask(tmp_flag_zmm, EFlags::Sign as i16, kmask);
+
         let flags = JitRegister::flags.as_zmm();
         self.or_with_kmask(flags, flags, tmp_flag_zmm, kmask);
     }
@@ -189,11 +226,21 @@ impl<const N: usize> JitBuffer<N> {
     pub fn add(&mut self, dest: Zmm, op1: Zmm, op2: Zmm) {
         let bytes = vpaddw!(dest, op1, op2).assemble();
         self.write_bytes(&bytes.as_slice());
+
+        // Update status bits based on the result
+        self.set_zero_flag_if_needed(dest);
+        self.set_sign_flag_if_needed(dest);
     }
 
     /// dest = op1 || op2
     pub fn or(&mut self, dest: Zmm, op1: Zmm, op2: Zmm) {
         let bytes = vporw!(dest, op1, op2).assemble();
+        self.write_bytes(&bytes.as_slice());
+    }
+
+    /// dest = op1 && op2
+    pub fn and(&mut self, dest: Zmm, op1: Zmm, op2: Zmm) {
+        let bytes = vpandw!(dest, op1, op2).assemble();
         self.write_bytes(&bytes.as_slice());
     }
 
@@ -259,10 +306,11 @@ impl<const N: usize> JitBuffer<N> {
                 let op2 = self.operand_to_register(*op2);
                 self.add(*dest, *op1, op2);
             }
-            JitIL::Cmp { k, left, right, op } => {
+            JitIL::Cmp { left, right, .. } => {
                 let left = self.operand_to_register(*left);
                 let right = self.operand_to_register(*right);
-                self.cmp(*k, left, right, *op);
+                let tmp_dest = self.next_scratch_reg();
+                self.sub(tmp_dest, left, right);
             }
         };
     }
@@ -398,7 +446,7 @@ impl From<Instruction> for JitIL {
                 op2: src.into(),
             },
             Instruction::Cmp { left, right } => JitIL::Cmp {
-                k: Zmm(2),
+                k: Zmm(4),
                 left: left.into(),
                 right: right.into(),
                 op: CmpOp::Equal,
@@ -411,6 +459,8 @@ impl From<Instruction> for JitIL {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cpu8086::*;
+    use std::arch::asm;
 
     #[rustfmt::skip]
     #[test]

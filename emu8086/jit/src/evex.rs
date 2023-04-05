@@ -31,10 +31,12 @@ pub enum AvxOpcode {
     Sub = 0xf9,
     Mov = 0x6f,
     Broadcast = 0x7b,
-    Cmp = 0x3f,
-    Add = 0xfd,
+    SignedCmp = 0x3f,
+    UnsignedCmp = 0x3e,
+    And = 0xdb,
     Or = 0xeb,
     Xor = 0xef,
+    Add = 0xfd,
 }
 
 impl AvxOpcode {
@@ -45,16 +47,21 @@ impl AvxOpcode {
             Sub => PrefixMmm::F,
             Mov => PrefixMmm::F,
             Broadcast => PrefixMmm::F38,
-            Cmp => PrefixMmm::F3A,
+            SignedCmp => PrefixMmm::F3A,
+            UnsignedCmp => PrefixMmm::F3A,
             Add => PrefixMmm::F,
             Or => PrefixMmm::F,
             Xor => PrefixMmm::F,
+            And => PrefixMmm::F,
         }
     }
 
     /// Returns `true` if the opcode is a wide instruction (W1 prefix)
     const fn is_wide(&self) -> bool {
-        matches!(*self, AvxOpcode::Cmp | AvxOpcode::Mov)
+        matches!(
+            *self,
+            AvxOpcode::SignedCmp | AvxOpcode::Mov | AvxOpcode::UnsignedCmp
+        )
     }
 }
 
