@@ -16,6 +16,10 @@ pub enum Register {
     Bp,
     Ip,
     Flags,
+
+    // Used to determine how many 16-bit words are used
+    COUNT,
+
     Al,
     Ah,
     Bl,
@@ -24,6 +28,24 @@ pub enum Register {
     Ch,
     Dl,
     Dh,
+}
+
+/// The sub register that this register represents
+///
+/// Example:
+/// Ax -> SubRegister::Full
+/// Al -> SubRegister::Low
+/// Ah -> SubRegister::High
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum SubRegister {
+    /// This is the full 16 bit register
+    Full,
+
+    /// This is only the high 8 bits of the register
+    High,
+
+    /// This is only the low 8 bits of the register
+    Low,
 }
 
 impl std::fmt::Display for Register {
@@ -47,6 +69,7 @@ impl std::fmt::Display for Register {
             Register::Bp => write!(f, "bp"),
             Register::Ip => write!(f, "ip"),
             Register::Flags => write!(f, "flags"),
+            Register::COUNT => unreachable!(),
         }
     }
 }
@@ -81,6 +104,29 @@ impl Register {
         match self {
             Ax | Bx | Cx | Dx | Si | Di | Bp | Sp | Ip | Flags => self as usize as u8 + 1,
             _ => panic!("zmm register for {self:?} is not implemented"),
+        }
+    }
+
+    /// Splits the current register as the main register and the sub register it represents
+    ///
+    /// Example:
+    /// Ax -> (Ax, Full)  
+    /// Al -> (Ax, Low)
+    /// Ah -> (Ax, High)
+    pub fn as_sub_register(&self) -> (Register, SubRegister) {
+        use Register::*;
+        use SubRegister::*;
+        match self {
+            Ax | Bx | Cx | Dx | Si | Di | Bp | Sp | Ip | Flags => (*self, Full),
+            Al => (Ax, Low),
+            Ah => (Ax, High),
+            Bl => (Bx, Low),
+            Bh => (Bx, High),
+            Cl => (Cx, Low),
+            Ch => (Cx, High),
+            Dl => (Dx, Low),
+            Dh => (Dx, High),
+            COUNT => unreachable!(),
         }
     }
 }

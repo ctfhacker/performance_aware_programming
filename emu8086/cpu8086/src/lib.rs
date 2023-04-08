@@ -1,4 +1,5 @@
 #![feature(generic_const_exprs)]
+#![feature(variant_count)]
 #![allow(incomplete_features)]
 
 pub mod const_checks;

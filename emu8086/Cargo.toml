@@ -9,11 +9,15 @@ edition = "2021"
 anyhow = "1.0.69"
 sys-info = "0.9.1"
 thiserror = "1.0.38"
-emu = { version = "0.1.0", path = "emu" }
+jit_emu = { version = "0.1.0", path = "jit_emu" }
 jit = { version = "0.1.0", path = "jit" }
 cpu8086 = { version = "0.1.0", path = "cpu8086" }
 
 [build-dependencies]
 cpu8086 = { version = "0.1.0", path = "cpu8086" }
-emu = { version = "0.1.0", path = "emu" }
+jit_emu = { version = "0.1.0", path = "jit_emu" }
 jit = { version = "0.1.0", path = "jit" }
+
+[features]
+default = []
+vecemu = []

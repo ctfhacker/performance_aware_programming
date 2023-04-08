@@ -1,5 +1,5 @@
 use cpu8086::register::Register;
-use emu::JitEmulatorState;
+use jit_emu::JitEmulatorState;
 
 fn main() {
     // Get the struct offsets for the EmulatorState struct
@@ -112,5 +112,6 @@ fn main() {
     );
 
     // Save the formatted assembly to findme.rs for emu/src/lib.rs to use with include_str!
+    #[cfg(feature = "vecemu")]
     let _ = std::fs::write("./.tmp_files/findme.rs", asm);
 }

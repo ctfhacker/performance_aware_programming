@@ -28,7 +28,7 @@ pub enum Error {
 pub fn decode_instruction<const SIZE: usize>(cpu: &mut RegisterState, memory: &Memory<SIZE>)  
     -> Result<Instruction> 
 where If<{ is_valid_address_size(SIZE) }>: True {
-    let address = Address(cpu.ip as usize);
+    let address = Address(cpu.ip() as usize);
 
     macro_rules! unknown_instr {
         () => {{
@@ -40,7 +40,7 @@ where If<{ is_valid_address_size(SIZE) }>: True {
 
     let mut segment = None;
 
-    let mut input = &memory.memory[cpu.ip as usize..];
+    let mut input = &memory.memory[cpu.ip() as usize..];
     let res;
 
     loop {
@@ -175,7 +175,7 @@ where If<{ is_valid_address_size(SIZE) }>: True {
 
                 // Continue parsing the immediate after the parsed size is there was
                 // a displacement or not
-                let mut imm = input[size] as u8;
+                let imm = input[size] as u8;
                 size += 1;
 
                 // Handle the s/d bit for the various opcodes
@@ -850,7 +850,7 @@ where If<{ is_valid_address_size(SIZE) }>: True {
                 input = &input[1..];
 
                 // Increment the IP from the CPU for reading this segment byte
-                cpu.ip += 1;
+                *cpu.ip_mut() += 1;
 
                 // Continue to parse the next instruction now that we've read this prefix
                 continue;
@@ -884,7 +884,7 @@ where If<{ is_valid_address_size(SIZE) }>: True {
         // eprintln!("ASM:  {instr}");
 
         // Update the input bytes
-        cpu.ip += u16::try_from(size).unwrap();
+        *cpu.ip_mut() += u16::try_from(size).unwrap();
 
         // Add the instruction to the instruction stream
         res = Some(instr);

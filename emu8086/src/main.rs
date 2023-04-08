@@ -7,8 +7,11 @@
 #![allow(incomplete_features)]
 
 use anyhow::Result;
-use emu::{Core, JitEmulatorState};
+
+#[cfg(feature = "vecemu")]
 use jit::JitBuffer;
+#[cfg(feature = "vecemu")]
+use jit_emu::{Core, JitEmulatorState};
 
 use std::arch::asm;
 use std::fs::File;
@@ -23,8 +26,11 @@ use cpu8086::instruction::Instruction;
 enum Stats {
     ReadInput,
     Decode,
+    Execute,
     WriteDecode,
+    #[cfg(feature = "vecemu")]
     BuildJit,
+    #[cfg(feature = "vecemu")]
     ExecJit,
 }
 
@@ -56,7 +62,7 @@ fn main() -> Result<()> {
     // Print CPU speed of the processor running the emulator
     print_cpu_speed();
 
-    let term_width = 110;
+    let term_width = 40;
 
     // Read the input file to decode
     let input_file = std::env::args()
@@ -128,21 +134,33 @@ fn main() -> Result<()> {
             Emulator::<1024>::with_memory(Path::new(&input_file))?
         );
 
+        #[cfg(feature = "vecemu")]
         let mut jit = JitBuffer::<{ 1024 * 1024 }>::new();
 
         for _iter in 0.. {
             // If we've read past the end of the emulator, return..
-            if emu.registers.ip as usize >= emu.memory.length {
+            if emu.registers.ip() as usize >= emu.memory.length {
                 break;
             }
 
-            let ip = emu.registers.ip;
+            println!("BEFORE");
+            emu.print_context();
 
             // Decode the input byte stream
             let decoded_instr = time!(
                 Decode,
                 cpu8086::decoder::decode_instruction(&mut emu.registers, &emu.memory).unwrap()
             );
+
+            println!("INSTR: {decoded_instr}");
+
+            // Execute the decoded instruction
+            time!(Execute, emu.execute(&decoded_instr));
+
+            println!("AFTER");
+            emu.print_context();
+
+            println!("");
 
             // Print the decoded instructions
             time!(WriteDecode, {
@@ -153,54 +171,61 @@ fn main() -> Result<()> {
                 }
             });
 
-            // Cache the starting offset for the next JIT instructions
-            let curr_offset = jit.offset;
-
-            // Cache the formatted decoded instruction string
-            let decoded_instr_str = format!("{decoded_instr}");
-
             // JIT the decoded instruction to the JIT stream
-            time!(BuildJit, {
-                // Get the JIT instruction for the decoded 8086 instruction
-                jit.write_instr(decoded_instr);
-            });
-
             // Debug print the JIT assembly for the decoded instruction
-            let jit_instr = jit.get_disassembly_between(curr_offset, jit.offset);
-            for (i, line) in jit_instr.iter().enumerate() {
-                if i == 0 {
-                    println!("{ip:#05x} {decoded_instr_str:20} | {line}");
-                } else {
-                    println!("{:26} | {line}", "");
+            #[cfg(feature = "vecemu")]
+            {
+                // Cache the starting offset for the next JIT instructions
+                let curr_offset = jit.offset;
+
+                // Cache the formatted decoded instruction string
+                let decoded_instr_str = format!("{decoded_instr}");
+
+                time!(BuildJit, {
+                    // Get the JIT instruction for the decoded 8086 instruction
+                    jit.write_instr(decoded_instr);
+                });
+
+                let ip = emu.registers.ip;
+
+                let jit_instr = jit.get_disassembly_between(curr_offset, jit.offset);
+                for (i, line) in jit_instr.iter().enumerate() {
+                    if i == 0 {
+                        println!("{ip:#05x} {decoded_instr_str:20} | {line}");
+                    } else {
+                        println!("{:26} | {line}", "");
+                    }
                 }
+                println!("{}", "-".repeat(60));
             }
-            println!("{}", "-".repeat(60));
         }
 
         // Initialize the JIT emulator
-        let jit_emu = JitEmulatorState::default();
+        #[cfg(feature = "vecemu")]
+        {
+            let jit_emu = JitEmulatorState::default();
 
-        #[allow(clippy::cast_possible_truncation)]
-        let core = rdtsc() as u8 % 20 + 1;
+            #[allow(clippy::cast_possible_truncation)]
+            let core = rdtsc() as u8 % 20 + 1;
 
-        println!("+{:-^width$}+", " CPU Before ", width = term_width - 2);
+            println!("+{:-^width$}+", " CPU Before ", width = term_width - 2);
 
-        jit_emu.print_cpu_state(Core(core));
+            jit_emu.print_cpu_state(Core(core));
 
-        // Execute the JIT buffer
-        time!(ExecJit, {
-            unsafe {
-                asm!(include_str!("../.tmp_files/findme.rs"),
-                    in("r13") usize::from(debug_on),
-                    in("r14") jit.buffer() as usize,
-                    in("r15") &jit_emu,
-                );
-            }
-        });
+            // Execute the JIT buffer
+            time!(ExecJit, {
+                unsafe {
+                    asm!(include_str!("../.tmp_files/findme.rs"),
+                        in("r13") usize::from(debug_on),
+                        in("r14") jit.buffer() as usize,
+                        in("r15") &jit_emu,
+                    );
+                }
+            });
 
-        println!("+{:-^width$}+", " CPU After ", width = term_width - 2);
-
-        jit_emu.print_cpu_state(Core(core));
+            println!("+{:-^width$}+", " CPU After ", width = term_width - 2);
+            jit_emu.print_cpu_state(Core(core));
+        }
     }
 
     // Stop the clock on the entire work load
@@ -235,9 +260,13 @@ fn main() -> Result<()> {
 
     print_stat!(ReadInput);
     print_stat!(Decode);
+    print_stat!(Execute);
     print_stat!(WriteDecode);
-    print_stat!(BuildJit);
-    print_stat!(ExecJit);
+    #[cfg(feature = "vecemu")]
+    {
+        print_stat!(BuildJit);
+        print_stat!(ExecJit);
+    }
 
     Ok(())
 }
