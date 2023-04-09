@@ -179,16 +179,18 @@ where If<{ is_valid_address_size(SIZE) }>: True {
                 size += 1;
 
                 // Handle the s/d bit for the various opcodes
-                let imm= match input[0] {
+                let imm = match input[0] {
                     0b1100_0110 => {
+                        // MOV
                         // Do not get a u16 immediate for a byte mov
-                        // imm as u16
-                        0xdead
+                        imm as u16
 
                     }
                     0b1100_0111 => {
+                        // MOV
+
                         // If we definitly have a wide move, get a u16 immediate
-                        let res = imm as u16 | u16::from(input[size]) << 8;
+                        let res = imm as u16 | (u16::from(input[size]) << 8);
                         size += 1;
                         res
                     }
@@ -201,9 +203,12 @@ where If<{ is_valid_address_size(SIZE) }>: True {
                         res
                     }
                     _ => {
-                        // imm as u16
-                        0xdead
-                        // Do nothing here
+                        if s != 0 {
+                            imm as i16 as u16
+                        } else {
+                            imm as u16
+                        }
+                            
                     }
                 };
 
