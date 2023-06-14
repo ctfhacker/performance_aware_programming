@@ -1,4 +1,6 @@
 use clap::Parser;
+use timeloop::Timer;
+
 use std::path::PathBuf;
 
 mod json;
@@ -15,7 +17,11 @@ struct Args {
     /// Input file containing json haversine points
     input: PathBuf,
 
+    /// Iterations
+    iters: u64,
+
     /// The pre-calculated answer for the given input
+    #[clap(long)]
     answer: Option<PathBuf>,
 }
 
@@ -50,61 +56,129 @@ fn format_bytes(num: usize) -> String {
     }
 }
 
+#[derive(Debug)]
+enum HaversineTimers {
+    ReadInput,
+    ReadAnswer,
+    ParseJson,
+    GetPairs,
+    CalculateHaversine,
+}
+
+impl Into<usize> for HaversineTimers {
+    fn into(self) -> usize {
+        self as usize
+    }
+}
+
+impl TryFrom<usize> for HaversineTimers {
+    type Error = &'static str;
+
+    fn try_from(val: usize) -> Result<HaversineTimers, Self::Error> {
+        match val {
+            0 => Ok(HaversineTimers::ReadInput),
+            1 => Ok(HaversineTimers::ReadAnswer),
+            2 => Ok(HaversineTimers::ParseJson),
+            3 => Ok(HaversineTimers::GetPairs),
+            4 => Ok(HaversineTimers::CalculateHaversine),
+            _ => Err("Unknown Timer value"),
+        }
+    }
+}
+
+fn rdtsc() -> u64 {
+    unsafe { std::arch::x86_64::_rdtsc() }
+}
+
 fn main() -> Result<(), Error> {
     // Parse the command line arguments
     let args = Args::parse();
+    let iters = args.iters;
 
-    // Read the given input
-    let data = std::fs::read_to_string(&args.input).map_err(Error::Io)?;
-    println!("Input size: {} ({})", data.len(), format_bytes(data.len()));
+    let mut timer = Timer::<HaversineTimers>::new();
 
-    // Get the answer file or look for a `.answer` file from the input `.json` file
-    let answer = args
-        .answer
-        .or({
-            let answer = args.input.with_extension("answer");
-            if answer.exists() {
-                Some(answer)
-            } else {
-                None
+    macro_rules! time {
+        ($subtimer:ident, $expr:expr) => {{
+            timer.start(HaversineTimers::$subtimer);
+            let _result = $expr;
+            timer.stop(HaversineTimers::$subtimer);
+            _result
+        }};
+    }
+
+    for _ in 0..iters {
+        let iter_start = rdtsc();
+
+        // Read the given input
+        let data = time!(
+            ReadInput,
+            std::fs::read_to_string(&args.input).map_err(Error::Io)?
+        );
+
+        if iters == 1 {
+            println!("Input size: {} ({})", data.len(), format_bytes(data.len()));
+        }
+
+        // Get the answer file or look for a `.answer` file from the input `.json` file
+        let answer = time!(
+            ReadAnswer,
+            args.answer
+                .clone()
+                .or({
+                    let answer = args.input.with_extension("answer");
+                    if answer.exists() {
+                        Some(answer)
+                    } else {
+                        None
+                    }
+                })
+                .map(|x| {
+                    if iters == 1 {
+                        println!("Using answer file: {x:?}");
+                    }
+                    std::fs::read_to_string(x)
+                })
+                .map(|x| x.unwrap().parse::<f64>())
+        );
+
+        // Parse the given data using the json parser
+        let data = time!(ParseJson, json::parse(&data).map_err(Error::Json)?);
+
+        // Retrieve the data from the parsed JSON
+        let pairs = time!(GetPairs, data["pairs"].as_vec().map_err(Error::Json)?);
+
+        // Calculate the haversine over the parsed pairs
+        time!(CalculateHaversine, {
+            let mut sum = 0.0;
+            for pair in pairs {
+                let pair = pair.as_map().map_err(Error::Json)?;
+                let x0 = pair["x0"].as_num().map_err(Error::Json)?;
+                let x1 = pair["x1"].as_num().map_err(Error::Json)?;
+                let y0 = pair["y0"].as_num().map_err(Error::Json)?;
+                let y1 = pair["y1"].as_num().map_err(Error::Json)?;
+                let haversine = haversine_degrees(*x0, *y0, *x1, *y1, EARTH_RADIUS_KM);
+                sum += haversine;
             }
-        })
-        .map(|x| {
-            println!("Using answer file: {x:?}");
-            std::fs::read_to_string(x)
-        })
-        .map(|x| x.unwrap().parse::<f64>());
 
-    // Parse the given data using the json parser
-    let data = json::parse(&data).map_err(Error::Json)?;
+            if iters == 1 {
+                // Calculate the average among the given pairs
+                sum /= pairs.len() as f64;
 
-    // Retrieve the data from the parsed JSON
-    let pairs = data["pairs"].as_vec().map_err(Error::Json)?;
-    println!("Pair count: {}", pairs.len());
+                println!("Haversine: {sum:24.20}");
+                if let Some(Ok(answer)) = answer {
+                    let diff = sum - answer;
+                    println!("--- Validation ---");
+                    println!("Answer:    {answer:24.20}");
+                    println!("Difference: {diff:24.20}");
+                }
+            }
+        });
 
-    // Calculate the haversine over the parsed pairs
-    let mut sum = 0.0;
-    for pair in pairs {
-        let pair = pair.as_map().map_err(Error::Json)?;
-        let x0 = pair["x0"].as_num().map_err(Error::Json)?;
-        let x1 = pair["x1"].as_num().map_err(Error::Json)?;
-        let y0 = pair["y0"].as_num().map_err(Error::Json)?;
-        let y1 = pair["y1"].as_num().map_err(Error::Json)?;
-        let haversine = haversine_degrees(*x0, *y0, *x1, *y1, EARTH_RADIUS_KM);
-        sum += haversine;
+        timer.add_to_total(rdtsc() - iter_start);
     }
 
-    // Calculate the average among the given pairs
-    sum /= pairs.len() as f64;
-
-    println!("Haversine: {sum:24.20}");
-
-    if let Some(Ok(answer)) = answer {
-        let diff = sum - answer;
-        println!("--- Validation ---");
-        println!("Answer:    {answer:24.20}");
-        println!("Difference: {diff:24.20}");
-    }
+    // Print the status of the timers
+    timer.print();
 
     Ok(())
 }
