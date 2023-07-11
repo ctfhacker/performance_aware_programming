@@ -7,4 +7,10 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.3.0", features = ["derive"] }
-timeloop = { git = "https://github.com/ctfhacker/timeloop" }
+
+[dependencies.timeloop]
+# git = "https://github.com/ctfhacker/timeloop"
+path = "/home/user/workspace/timeloop"
+default-features = false
+features = ["enable"] 
+# features = ["disable"] 

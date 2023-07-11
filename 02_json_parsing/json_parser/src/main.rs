@@ -1,6 +1,4 @@
 use clap::Parser;
-use timeloop::Timer;
-
 use std::path::PathBuf;
 
 mod json;
@@ -56,61 +54,33 @@ fn format_bytes(num: usize) -> String {
     }
 }
 
-#[derive(Debug)]
-enum HaversineTimers {
-    ReadInput,
-    ReadAnswer,
-    ParseJson,
-    GetPairs,
-    CalculateHaversine,
-}
-
-impl Into<usize> for HaversineTimers {
-    fn into(self) -> usize {
-        self as usize
+timeloop::impl_enum!(
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum HaversineTimers {
+        ReadInput,
+        ReadAnswer,
+        ParseJson,
+        GetPairs,
+        CalculateHaversine,
+        Drops,
     }
-}
+);
 
-impl TryFrom<usize> for HaversineTimers {
-    type Error = &'static str;
-
-    fn try_from(val: usize) -> Result<HaversineTimers, Self::Error> {
-        match val {
-            0 => Ok(HaversineTimers::ReadInput),
-            1 => Ok(HaversineTimers::ReadAnswer),
-            2 => Ok(HaversineTimers::ParseJson),
-            3 => Ok(HaversineTimers::GetPairs),
-            4 => Ok(HaversineTimers::CalculateHaversine),
-            _ => Err("Unknown Timer value"),
-        }
-    }
-}
-
-fn rdtsc() -> u64 {
-    unsafe { std::arch::x86_64::_rdtsc() }
-}
+timeloop::create_profiler!(HaversineTimers);
 
 fn main() -> Result<(), Error> {
+    let total_time_start = std::time::Instant::now();
+
+    timeloop::start_profiler!();
+    use HaversineTimers::*;
+
     // Parse the command line arguments
     let args = Args::parse();
     let iters = args.iters;
 
-    let mut timer = Timer::<HaversineTimers>::new();
-
-    macro_rules! time {
-        ($subtimer:ident, $expr:expr) => {{
-            timer.start(HaversineTimers::$subtimer);
-            let _result = $expr;
-            timer.stop(HaversineTimers::$subtimer);
-            _result
-        }};
-    }
-
     for _ in 0..iters {
-        let iter_start = rdtsc();
-
         // Read the given input
-        let data = time!(
+        let data = timeloop::time_work!(
             ReadInput,
             std::fs::read_to_string(&args.input).map_err(Error::Io)?
         );
@@ -120,7 +90,7 @@ fn main() -> Result<(), Error> {
         }
 
         // Get the answer file or look for a `.answer` file from the input `.json` file
-        let answer = time!(
+        let answer = timeloop::time_work!(
             ReadAnswer,
             args.answer
                 .clone()
@@ -142,13 +112,13 @@ fn main() -> Result<(), Error> {
         );
 
         // Parse the given data using the json parser
-        let data = time!(ParseJson, json::parse(&data).map_err(Error::Json)?);
+        let data = timeloop::time_work!(ParseJson, json::parse(&data).map_err(Error::Json)?);
 
         // Retrieve the data from the parsed JSON
-        let pairs = time!(GetPairs, data["pairs"].as_vec().map_err(Error::Json)?);
+        let pairs = timeloop::time_work!(GetPairs, data["pairs"].as_vec().map_err(Error::Json)?);
 
         // Calculate the haversine over the parsed pairs
-        time!(CalculateHaversine, {
+        timeloop::time_work!(CalculateHaversine, {
             let mut sum = 0.0;
             for pair in pairs {
                 let pair = pair.as_map().map_err(Error::Json)?;
@@ -160,10 +130,14 @@ fn main() -> Result<(), Error> {
                 sum += haversine;
             }
 
-            if iters == 1 {
-                // Calculate the average among the given pairs
-                sum /= pairs.len() as f64;
+            // Calculate the average among the given pairs
+            sum /= pairs.len() as f64;
 
+            if let Some(Ok(answer)) = answer {
+                assert!((sum - answer).abs() <= 0.00001);
+            }
+
+            if iters == 1 {
                 println!("Haversine: {sum:24.20}");
                 if let Some(Ok(answer)) = answer {
                     let diff = sum - answer;
@@ -174,11 +148,16 @@ fn main() -> Result<(), Error> {
             }
         });
 
-        timer.add_to_total(rdtsc() - iter_start);
+        timeloop::time_work!(Drops, {
+            drop(data);
+            drop(answer);
+        });
     }
 
+    println!("Time elapsed: {:?}", total_time_start.elapsed());
+
     // Print the status of the timers
-    timer.print();
+    timeloop::print!();
 
     Ok(())
 }
