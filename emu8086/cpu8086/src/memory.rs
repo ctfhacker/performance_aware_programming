@@ -99,4 +99,29 @@ where
 
         Ok(res)
     }
+
+    /// Read the given [`T`] from the [`Address`] location in the memory
+    pub fn write<T: Sized + Copy + std::fmt::LowerHex>(
+        &mut self,
+        address: Address,
+        value: T,
+    ) -> Result<()> {
+        let start = address.0;
+
+        // Ensure the memory can be read in bounds.
+        // Reminder: SIZE is always a power of two, so this add will work
+        let end_addr = start + size_of::<T>();
+
+        ensure!(
+            end_addr == end_addr & (SIZE - 1),
+            Error::OutOfBoundsRead(address)
+        );
+
+        // Write the value from the memory
+        unsafe {
+            *(self.memory[start..end_addr].as_mut_ptr().cast()) = value;
+        }
+
+        Ok(())
+    }
 }

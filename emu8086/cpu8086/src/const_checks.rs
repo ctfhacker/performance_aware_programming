@@ -12,5 +12,5 @@ pub const fn is_power_of_two(val: usize) -> bool {
 
 /// Checks that the given address size is a power of two and can fit in a `u16`
 pub const fn is_valid_address_size(val: usize) -> bool {
-    is_power_of_two(val) && val <= u16::MAX as usize
+    is_power_of_two(val)
 }

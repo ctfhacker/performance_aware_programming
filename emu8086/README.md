@@ -1,6 +1,28 @@
 # 8086 Emulator
 
+The current emulator will execute a given program. For example, to execute the draw rectangle programs
+from the course
+
+```
+git clone https://github.com/cmuratori/computer_enhance
+cargo run -r -- ./computer_enhance/perfaware/part1/listing_0055_challenge_rectangle
+```
+
+Open the `./computer_enhance/perfaware/part1/listing_0055_challenge_rectangle.memory.data` in `GIMP` 
+as:
+
+* RGB Alpha
+* Offset: 256
+* Width: 64
+* Height: 64
+
+To display the generated rectangle image:
+
+![rect.png](./rect.png)
+
 ## AVX512 Emulation
+
+_STASHED NOT COMPLETE_
 
 This emulator attempts to create an 8086 vectorized emulator using AVX512. This means we will be running
 32 concurrent emulators using the AVX512 instruction set. This is an on going effort as the Performance

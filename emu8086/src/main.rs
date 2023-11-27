@@ -24,7 +24,7 @@ use cpu8086::instruction::Instruction;
 
 #[derive(Debug)]
 enum Stats {
-    ReadInput,
+    CreateEmuFromInput,
     Decode,
     Execute,
     WriteDecode,
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
     let mut best_stats = [u64::MAX; std::mem::variant_count::<Stats>()];
     let mut best_stats_time = [Duration::from_secs(u64::MAX); std::mem::variant_count::<Stats>()];
 
-    println!("Number of iterations: {ITERS:#x}");
+    println!("Number of iterations: {ITERS:#x} {ITERS}");
 
     let total_start = rdtsc();
 
@@ -127,49 +127,50 @@ fn main() -> Result<()> {
     let debug_on = false;
 
     // Main iteration loop
-    for _iter in 0..ITERS {
+    for iteration in 0..ITERS {
         // Init the emulator
         let mut emu = time!(
-            ReadInput,
-            Emulator::<1024>::with_memory(Path::new(&input_file))?
+            CreateEmuFromInput,
+            Emulator::<{ 64 * 1024 }>::with_memory(Path::new(&input_file))?
         );
 
         #[cfg(feature = "vecemu")]
         let mut jit = JitBuffer::<{ 1024 * 1024 }>::new();
 
-        for _iter in 0.. {
+        for iter in 0.. {
             // If we've read past the end of the emulator, return..
             if emu.registers.ip() as usize >= emu.memory.length {
                 break;
             }
 
-            println!("BEFORE");
-            emu.print_context();
+            // println!("BEFORE");
+            // emu.print_context();
 
             // Decode the input byte stream
             let decoded_instr = time!(
                 Decode,
-                cpu8086::decoder::decode_instruction(&mut emu.registers, &emu.memory).unwrap()
+                cpu8086::decoder::decode_instruction(&mut emu.registers, &emu.memory)?
             );
 
-            println!("INSTR: {decoded_instr}");
+            // println!("INSTR: {decoded_instr}");
 
             // Execute the decoded instruction
-            time!(Execute, emu.execute(&decoded_instr));
+            time!(Execute, emu.execute(&decoded_instr)?);
 
-            println!("AFTER");
-            emu.print_context();
-
-            println!("");
+            // println!("AFTER");
+            // emu.print_context();
+            // println!("");
 
             // Print the decoded instructions
-            time!(WriteDecode, {
-                if matches!(decoded_instr, Instruction::Lock) {
-                    file.write_all(format!("{decoded_instr}").as_bytes())?;
-                } else {
-                    file.write_all(format!("{decoded_instr}\n").as_bytes())?;
-                }
-            });
+            if iteration == 0 {
+                time!(WriteDecode, {
+                    if matches!(decoded_instr, Instruction::Lock) {
+                        file.write_all(format!("{decoded_instr}").as_bytes())?;
+                    } else {
+                        file.write_all(format!("{decoded_instr}\n").as_bytes())?;
+                    }
+                });
+            }
 
             // JIT the decoded instruction to the JIT stream
             // Debug print the JIT assembly for the decoded instruction
@@ -226,6 +227,12 @@ fn main() -> Result<()> {
             println!("+{:-^width$}+", " CPU After ", width = term_width - 2);
             jit_emu.print_cpu_state(Core(core));
         }
+
+        if iteration == 0 {
+            let output_file = format!("{input_file}.memory.data");
+            // Write the memory
+            std::fs::write(output_file, &emu.memory.memory[..1000 + 64 * 64 * 4])?;
+        }
     }
 
     // Stop the clock on the entire work load
@@ -241,7 +248,7 @@ fn main() -> Result<()> {
 
             eprintln!(
                 // "{:12} \n  Best {:<8.2?} \n  Avg  {:<.2?}/iter \n  Best {:<.2?} cycles/iter \n  Avg  {:<.2?} cycles/iter \n  % of total time: {:5.2}%",
-                "{:12} | Best {:>8.2?} | Avg {:>8.2?}/iter | Best {:>8.2?} cycles/iter | Avg {:>10.2?} cycles/iter | % of total time: {:5.2}%",
+                "{:20} | Best {:>8.2?} | Avg {:>8.2?}/iter | Best {:>8.2?} cycles/iter | Avg {:>10.2?} cycles/iter | % of total time: {:5.2}%",
                 format!("{:?}", Stats::$stat),
                 best_stat_time,
                 Duration::from_nanos((curr_stat_time.as_nanos() as f64 / ITERS as f64) as u64),
@@ -258,7 +265,7 @@ fn main() -> Result<()> {
         width = term_width - 2
     );
 
-    print_stat!(ReadInput);
+    print_stat!(CreateEmuFromInput);
     print_stat!(Decode);
     print_stat!(Execute);
     print_stat!(WriteDecode);
