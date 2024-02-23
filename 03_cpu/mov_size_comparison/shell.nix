@@ -16,5 +16,6 @@ in pkgs.mkShell {
     pkgs.rust-bin.nightly.latest.default
     pkgs.rust-analyzer
     pkgs.pkg-config
+    pkgs.gnuplot
   ];
 }
