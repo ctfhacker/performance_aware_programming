@@ -33,7 +33,7 @@ fn main() {
         for (func, func_name) in FUNCS.iter() {
             println!("----- {:?} -----", func_name);
 
-            let mut tester = RepititionTester::new(Duration::from_millis(500));
+            let mut tester = RepititionTester::new(Duration::from_millis(2000));
 
             while tester.is_testing() {
                 // Start the timer for this iteration
