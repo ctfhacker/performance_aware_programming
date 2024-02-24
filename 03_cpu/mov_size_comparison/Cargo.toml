@@ -9,3 +9,7 @@ edition = "2021"
 rand = "0.8.5"
 timeloop = { git = "https://github.com/ctfhacker/timeloop", version = "0.1.0" }
 # timeloop = { path = "/home/user/workspace/timeloop" }
+
+[features]
+default = []
+timeloop = []
