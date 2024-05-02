@@ -78,6 +78,7 @@ dependencies = [
 [[package]]
 name = "timeloop"
 version = "0.1.0"
+source = "git+https://github.com/ctfhacker/timeloop#3c6e145f75af132314d1f40616c54ebbb33e3203"
 dependencies = [
  "lazy_static",
  "rand",

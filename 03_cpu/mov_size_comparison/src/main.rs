@@ -18,7 +18,7 @@ pub struct TestParameters {
 }
 
 const ALLOC_SIZE: usize = 1024 * 1024 * 1024;
-const TEST_DURATION: Duration = Duration::from_millis(250);
+const TEST_DURATION: Duration = Duration::from_millis(750);
 
 #[cfg(feature = "timeloop")]
 fn main() {
@@ -63,6 +63,8 @@ fn main() {
                 "{num} {:8.2}\n",
                 res.min.bytes_per_second.unwrap() / 1024. / 1024. / 1024.
             ));
+
+            res.print();
         }
     }
 
@@ -102,6 +104,10 @@ fn main() {
     // plot.push_str("pause -1\n");
 
     std::fs::write("data.plot", plot).unwrap();
+    std::process::Command::new("gnuplot")
+        .arg("data.plot")
+        .spawn()
+        .unwrap();
 }
 
 /// Calculate the OS frequency by timing a small timeout using `rdtsc`
@@ -204,5 +210,9 @@ fn main() {
 
     // plot.push_str("pause -1\n");
 
-    std::fs::write("data.plot", plot).unwrap();
+    std::fs::write("data_notimeloop.plot", plot).unwrap();
+    std::process::Command::new("gnuplot")
+        .arg("data_notimeloop.plot")
+        .spawn()
+        .unwrap();
 }
