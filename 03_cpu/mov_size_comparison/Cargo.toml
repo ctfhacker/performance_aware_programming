@@ -11,5 +11,8 @@ timeloop = { git = "https://github.com/ctfhacker/timeloop", version = "0.1.0" }
 # timeloop = { path = "/home/user/workspace/timeloop" }
 
 [features]
-default = []
+default = ["timeloop"]
 timeloop = []
+
+[profile.release]
+debug = true
