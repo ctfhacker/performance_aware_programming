@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::BufReader;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,8 +32,17 @@ struct Pair {
     y1: f32,
 }
 
+#[derive(Debug, Copy, Clone)]
+enum Operation {
+    Sin,
+    Cos,
+    Asin,
+    Sqrt,
+}
+
 /// Calculate the haversine distance between (x0, y0) and (x1, y1) assuming
 /// the given `radius`
+#[cfg(not(feature = "log_bounds"))]
 fn haversine_degrees(pair: Pair, radius: f32) -> f32 {
     let dy = (pair.y1 - pair.y0).to_radians();
     let dx = (pair.x1 - pair.x0).to_radians();
@@ -41,6 +51,51 @@ fn haversine_degrees(pair: Pair, radius: f32) -> f32 {
 
     let root = (dy / 2.0).sin().powi(2) + y0.cos() * y1.cos() * (dx / 2.0).sin().powi(2);
     2.0 * radius * root.sqrt().asin()
+}
+
+/// Calculate the haversine distance between (x0, y0) and (x1, y1) assuming
+/// the given `radius`
+#[cfg(feature = "log_bounds")]
+fn haversine_degrees(pair: Pair, radius: f32, ranges: &mut [(f32, f32); 4]) -> f32 {
+    let dy = (pair.y1 - pair.y0).to_radians();
+    let dx = (pair.x1 - pair.x0).to_radians();
+    let y0 = pair.y0.to_radians();
+    let y1 = pair.y1.to_radians();
+
+    macro_rules! sin {
+        ($val:expr) => {{
+            ranges[Operation::Sin as usize].0 = ranges[Operation::Sin as usize].0.min($val);
+            ranges[Operation::Sin as usize].1 = ranges[Operation::Sin as usize].1.max($val);
+            $val.sin()
+        }};
+    }
+
+    macro_rules! cos {
+        ($val:expr) => {{
+            ranges[Operation::Cos as usize].0 = ranges[Operation::Cos as usize].0.min($val);
+            ranges[Operation::Cos as usize].1 = ranges[Operation::Cos as usize].1.max($val);
+            $val.cos()
+        }};
+    }
+
+    macro_rules! asin {
+        ($val:expr) => {{
+            ranges[Operation::Asin as usize].0 = ranges[Operation::Asin as usize].0.min($val);
+            ranges[Operation::Asin as usize].1 = ranges[Operation::Asin as usize].1.max($val);
+            $val.asin()
+        }};
+    }
+
+    macro_rules! sqrt {
+        ($val:expr) => {{
+            ranges[Operation::Sqrt as usize].0 = ranges[Operation::Sqrt as usize].0.min($val);
+            ranges[Operation::Sqrt as usize].1 = ranges[Operation::Sqrt as usize].1.max($val);
+            $val.sqrt()
+        }};
+    }
+
+    let root = sin!(dy / 2.0).powi(2) + cos!(y0) * cos!(y1) * sin!(dx / 2.0).powi(2);
+    2.0 * radius * asin!(sqrt!(root))
 }
 
 pub fn serde_json(input: &PathBuf) -> Result<Points> {
@@ -55,16 +110,50 @@ pub fn simd_json(input: &PathBuf) -> Result<Points> {
     simd_json::serde::from_reader(reader).map_err(|e| e.into())
 }
 
+#[cfg(not(feature = "log_bounds"))]
 pub fn naive_work(data: Arc<Points>, cores: usize) -> f32 {
     let earth_radius_km = 6371.0;
     let mut sum = 0.0;
     for pair in &data.pairs {
         sum += haversine_degrees(*pair, earth_radius_km);
     }
+    sum
+}
+
+#[cfg(feature = "log_bounds")]
+pub fn naive_work(data: Arc<Points>, cores: usize) -> f32 {
+    let earth_radius_km = 6371.0;
+    let mut sum = 0.0;
+    let mut ranges = [(f32::MAX, f32::MIN); 4];
+    for pair in &data.pairs {
+        sum += haversine_degrees(*pair, earth_radius_km, &mut ranges);
+    }
+
+    println!(
+        "{:?}: {:?}",
+        Operation::Sin,
+        ranges[Operation::Sin as usize]
+    );
+    println!(
+        "{:?}: {:?}",
+        Operation::Cos,
+        ranges[Operation::Cos as usize]
+    );
+    println!(
+        "{:?}: {:?}",
+        Operation::Asin,
+        ranges[Operation::Asin as usize]
+    );
+    println!(
+        "{:?}: {:?}",
+        Operation::Sqrt,
+        ranges[Operation::Sqrt as usize]
+    );
 
     sum
 }
 
+#[cfg(not(feature = "log_bounds"))]
 pub fn rayon_work_par_iter(data: Arc<Points>, cores: usize) -> f32 {
     std::env::set_var("RAYON_NUM_THREADS", format!("{cores}"));
 
@@ -80,6 +169,7 @@ pub fn rayon_work_par_iter(data: Arc<Points>, cores: usize) -> f32 {
     sum
 }
 
+#[cfg(not(feature = "log_bounds"))]
 fn worker(data: Arc<Points>, start_index: usize, len: usize) -> f32 {
     let mut sum = 0.0;
     let earth_radius_km = 6371.0;
@@ -91,6 +181,7 @@ fn worker(data: Arc<Points>, start_index: usize, len: usize) -> f32 {
 }
 
 /// Manually chunk and parallelize the data for the given number of cores
+#[cfg(not(feature = "log_bounds"))]
 pub fn manual_chunk_parallel(data: Arc<Points>, cores: usize) -> f32 {
     let per_core_len = data.pairs.len() / cores;
     let last_core_offset = data.pairs.len() - (cores * per_core_len);
@@ -201,17 +292,17 @@ pub fn main() -> Result<()> {
 
     time_work!(naive_work, 1);
 
-    time_work!(rayon_work_par_iter, 2);
-    time_work!(rayon_work_par_iter, 4);
-    time_work!(rayon_work_par_iter, 8);
-    time_work!(rayon_work_par_iter, 12);
-    time_work!(rayon_work_par_iter, 16);
+    // time_work!(rayon_work_par_iter, 2);
+    // time_work!(rayon_work_par_iter, 4);
+    // time_work!(rayon_work_par_iter, 8);
+    // time_work!(rayon_work_par_iter, 12);
+    // time_work!(rayon_work_par_iter, 16);
 
-    time_work!(manual_chunk_parallel, 2);
-    time_work!(manual_chunk_parallel, 4);
-    time_work!(manual_chunk_parallel, 8);
-    time_work!(manual_chunk_parallel, 12);
-    time_work!(manual_chunk_parallel, 16);
+    // time_work!(manual_chunk_parallel, 2);
+    // time_work!(manual_chunk_parallel, 4);
+    // time_work!(manual_chunk_parallel, 8);
+    // time_work!(manual_chunk_parallel, 12);
+    // time_work!(manual_chunk_parallel, 16);
 
     Ok(())
 }

@@ -99,9 +99,62 @@ fn main() {
     }
 
     // Generate random points
-    for _ in 0..args.number {
+    for i in 0..args.number {
         let (min_x, max_x, min_y, max_y) = chunks[rng.next() as usize % chunks.len()];
 
+        #[cfg(debug_assertions)]
+        let point = match i {
+            // Diagonal
+            0 => Pair {
+                x0: args.min_x,
+                y0: args.min_y,
+                x1: args.max_x,
+                y1: args.max_y,
+            },
+            // Left edge
+            1 => Pair {
+                x0: args.min_x,
+                y0: args.min_y,
+                x1: args.min_x,
+                y1: args.max_y,
+            },
+            // Bottom edge
+            2 => Pair {
+                x0: args.min_x,
+                y0: args.min_y,
+                x1: args.max_x,
+                y1: args.min_y,
+            },
+            // Right edge
+            3 => Pair {
+                x0: args.max_x,
+                y0: args.min_y,
+                x1: args.max_x,
+                y1: args.max_y,
+            },
+            // Top edge
+            4 => Pair {
+                x0: args.min_x,
+                y0: args.max_y,
+                x1: args.max_x,
+                y1: args.max_y,
+            },
+            // Diagonal
+            5 => Pair {
+                x0: args.min_x,
+                y0: args.max_y,
+                x1: args.max_x,
+                y1: args.min_y,
+            },
+            _ => Pair {
+                x0: rng.gen_range(min_x..max_x),
+                y0: rng.gen_range(min_y..max_y),
+                x1: rng.gen_range(min_x..max_x),
+                y1: rng.gen_range(min_y..max_y),
+            },
+        };
+
+        #[cfg(not(debug_assertions))]
         let point = Pair {
             x0: rng.gen_range(min_x..max_x),
             y0: rng.gen_range(min_y..max_y),
@@ -125,7 +178,15 @@ fn main() {
     json = json.replace("},", "},\n");
     json = json.replace("{\"x", "    {\"x");
 
+    #[cfg(debug_assertions)]
+    let outfile = format!(
+        "data_WITH_MINX_{}_MINY_{}_MAXX_{}_MAXY_{}_{}_seed_{}_{haversine}.json",
+        args.min_x, args.min_y, args.max_x, args.max_y, args.number, args.seed
+    );
+
+    #[cfg(not(debug_assertions))]
     let outfile = format!("data_{}_seed_{}_{haversine}.json", args.number, args.seed);
+
     println!("Generated file written to {outfile}");
     std::fs::write(&outfile, json).expect("Failed to write {outfile}");
 }
