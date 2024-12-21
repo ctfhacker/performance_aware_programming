@@ -329,3 +329,25 @@ manual_chunk_parallel          = 884.9950µs |   9.86% of total time (using simd
 Total                          = 8.9741ms seconds (using simdjson)
 Throughput                     = 1.11 Mhaversines/seconds
 ```
+
+# Mathematical function ranges
+
+Generate a dataset with points that specifically include min/max for x/y coords.
+
+```
+cd gen_haversine_data
+cargo run -- 10000000 123
+```
+
+Use this dataset to log the bounds of `sin`, `cos`, `asin`, and `sqrt`:
+
+```
+cargo run -r --features log_bounds -- ../gen_haversine_data/data_WITH_MINX_-90_MINY_-180_MAXX_90_MAXY_180_10000000_seed_123_5381.371.json
+```
+
+```
+Sin:  (-3.1415927, 3.1415927)
+Cos:  (-3.1415927, 3.1415927)
+Asin: (8.742278e-8, 1.0)
+Sqrt: (7.642742e-15, 1.0)
+```
