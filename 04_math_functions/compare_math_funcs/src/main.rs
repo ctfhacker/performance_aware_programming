@@ -30,7 +30,28 @@ fn sqrt_orig(val: f64) -> f64 {
 }
 
 fn sqrt_test(val: f64) -> f64 {
-    val.sqrt()
+    let mut res: f64 = val;
+    unsafe {
+        core::arch::asm!(
+            "sqrtsd {0}, {0}", inout(xmm_reg) res, options(nostack)
+        );
+    }
+    res
+}
+
+fn sqrt_test2(mut val: f64) -> f64 {
+    unsafe {
+        core::arch::asm!(
+            r#"
+            fld qword ptr [{ptr}]
+            fsqrt
+            fstp qword ptr [{ptr}]
+            "#,
+            ptr = inout(reg) &mut val => _,
+            options(nostack)
+        );
+    }
+    val
 }
 
 struct MathTest {
@@ -40,7 +61,7 @@ struct MathTest {
 }
 
 fn main() {
-    const NUM_SAMPLES: usize = 1_000_000;
+    const NUM_SAMPLES: usize = 100_000_000;
     let sin_range = -3.1415927..=3.1415927;
     let cos_range = -3.1415927..=3.1415927;
     let asin_range = 0.0..=1.0;
@@ -64,9 +85,14 @@ fn main() {
             tests: &[("asin_test", asin_test)],
         },
         MathTest {
-            range: sqrt_range,
+            range: sqrt_range.clone(),
             control: sqrt_orig,
             tests: &[("sqrt_test", sqrt_test)],
+        },
+        MathTest {
+            range: sqrt_range,
+            control: sqrt_orig,
+            tests: &[("sqrt_test2", sqrt_test2)],
         },
     ];
 
