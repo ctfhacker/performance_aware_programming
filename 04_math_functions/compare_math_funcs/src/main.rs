@@ -63,17 +63,22 @@ struct MathTest {
 
 fn main() {
     const NUM_SAMPLES: usize = 100_000_000;
-    let sin_range = -3.1415927..=3.1415927;
-    let cos_range = -3.1415927..=3.1415927;
+    let sin_range = -3.1415927..=PI;
+    let cos_range = -3.1415927..=PI;
     let asin_range = 0.0..=1.0;
     let sqrt_range = 0.0..=1.0;
     let mut rng = rand::thread_rng();
 
     let tests = [
         MathTest {
+            range: 0.0..=PI,
+            control: sin_orig,
+            tests: &[("sin_approx", sin_approx)],
+        },
+        MathTest {
             range: sin_range,
             control: sin_orig,
-            tests: &[("sin_test", sin_test)],
+            tests: &[("sin_approx", sin_approx)],
         },
         MathTest {
             range: cos_range,
@@ -103,10 +108,10 @@ fn main() {
         tests,
     } in tests
     {
-        for (test_name, test_fn) in tests {
-            let mut largest_diff = 0.0;
-            let mut largest_diff_input = 0.0;
+        let mut largest_diff = 0.0;
+        let mut largest_diff_input = 0.0;
 
+        for (test_name, test_fn) in tests {
             for _ in 0..NUM_SAMPLES {
                 let val: f64 = rng.gen_range(range.clone());
                 let control_res = control(val);
@@ -119,9 +124,24 @@ fn main() {
                 }
             }
 
-            println!("-- {test_name} --");
-            println!("Largest diff: {largest_diff}");
-            println!("Largest diff input: {largest_diff_input}");
+            let reference = control(largest_diff_input);
+            println!("-- {range:?} --");
+            println!("Largest diff for {test_name}");
+            let func = format!("  f({largest_diff_input})");
+            println!("{func} = {reference} [reference]");
+
+            for (test_name, test_fn) in tests {
+                let result = test_fn(largest_diff_input);
+                let diff_from_reference = result - reference;
+                println!(
+                    "{:width$} = {largest_diff_input} ({diff_from_reference}) [{test_name}]",
+                    "",
+                    width = func.len()
+                );
+            }
+
+            // Spacing
+            println!();
         }
     }
 }
