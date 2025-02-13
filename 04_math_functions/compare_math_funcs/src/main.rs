@@ -1,12 +1,13 @@
 use rand::Rng;
+use std::f64::consts::PI;
 use std::ops::RangeInclusive;
 
 fn sin_orig(val: f64) -> f64 {
     val.sin()
 }
 
-fn sin_test(val: f64) -> f64 {
-    val.sin()
+fn sin_approx(x: f64) -> f64 {
+    -4.0 / PI.powi(2) * x.powi(2) + 4.0 / PI * x
 }
 
 fn cos_orig(val: f64) -> f64 {
